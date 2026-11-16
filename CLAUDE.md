@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **公開リポジトリなので実名を一切置かないこと。** データファイルだけでなく、**コード中の例文・プレースホルダ・コメント・README の例・コミットメッセージも対象**。過去に名簿の実名をプレースホルダに使ってしまい公開した。例が必要なときは架空の名前(山田太郎、佐藤花、井ノ口学など)を使う。
 
 - 公開 URL: https://projectsubmarine.github.io/mmc-timing/(`main` への push で自動更新)
-- **このブランチ(`MMC44`)は OldTimer クラス(ビブ 9xx)を追加した版。** `main` は6クラスのまま。GitHub Pages が配信するのは `main` なので、このブランチの内容は公開 URL には出ない。確認するにはローカルの `index.html` を直接開く。
+- OldTimer クラス(ビブ 9xx)は MMC44 から追加し、`main` に取り込み済み(ブランチ `MMC44` はマージ後も残してある)。
 - クラスを増減したときに直す箇所は `CLASSES` / `CLASS_BIB` / `RUN_ORDER` / `CLASS_JA` の4つ。それ以外はこれらから導いてあるので触らなくてよい。6クラス時代の保存データは `sanitizeState` が足りないクラスを空で補って読む。
 - 元になった Excel ブック: ローカルの `../Excel-File-Development/`(非公開。実名データを含むので公開しない)
 
