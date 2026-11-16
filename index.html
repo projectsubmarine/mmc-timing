@@ -1087,9 +1087,12 @@ function viewResult(run) {
     const { issues } = analyzeResults(run);
     issuesBox.replaceChildren(issueList(issues, rows.length ? '問題は見つかりませんでした。' : '') || '');
     const nUnknown = rows.filter(r => (norm(r.bib) || str(r.name) || str(r.time)) && classOf(r.bib) < 0).length;
-    chips.replaceChildren(h('span', { class: 'chip' }, `${rows.length}行`),
-      CLASSES.map((c, k) => h('span', { class: 'chip' }, `${c} ${resultRows(run, k).length}`)),
-      nUnknown ? h('span', { class: 'chip err' }, `クラス不明 ${nUnknown}`) : null);
+    // replaceChildren は h() と違い、配列を展開せず null も読み飛ばさない。
+    // そのまま渡すと "[object HTMLSpanElement]" や "null" が表示されるので広げて渡す。
+    chips.replaceChildren(
+      h('span', { class: 'chip' }, `${rows.length}行`),
+      ...CLASSES.map((c, k) => h('span', { class: 'chip' }, `${c} ${resultRows(run, k).length}`)),
+      ...(nUnknown ? [h('span', { class: 'chip err' }, `クラス不明 ${nUnknown}`)] : []));
   };
 
   const grid = makeGrid({
