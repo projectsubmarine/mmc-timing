@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## このリポジトリについて
 
-自転車レース Magic Mushroom Cup(MMC)のタイム集計をブラウザで行うツール。`index.html` 1枚で完結しており、外部ライブラリもビルド手順もテストも無い。公開リポジトリなので**実名データを置かないこと**。
+自転車レース Magic Mushroom Cup(MMC)のタイム集計をブラウザで行うツール。`index.html` 1枚で完結しており、外部ライブラリもビルド手順もテストも無い。
+
+**公開リポジトリなので実名を一切置かないこと。** データファイルだけでなく、**コード中の例文・プレースホルダ・コメント・README の例・コミットメッセージも対象**。過去に名簿の実名をプレースホルダに使ってしまい公開した。例が必要なときは架空の名前(山田太郎、佐藤花、井ノ口学など)を使う。
 
 - 公開 URL: https://projectsubmarine.github.io/mmc-timing/(`main` への push で自動更新)
 - 元になった Excel ブック: ローカルの `../Excel-File-Development/`(非公開。実名データを含むので公開しない)
@@ -13,7 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 実装メモ
 
-- 画面は8ステップ(`STEPS` 定数)。エントリー → スタートリスト1本目 → 1本目リザルト → 1本目クラス別 → スタートリスト2本目 → 2本目リザルト → 最終リザルト → Web用。
+- 画面は9ステップ(`STEPS` 定数)。名簿取込 → エントリー → スタートリスト1本目 → 1本目リザルト → 1本目クラス別 → スタートリスト2本目 → 2本目リザルト → 最終リザルト → Web用。ステップを増減したら、ソース中の `// ---------- n ○○ ----------` の番号もそろえる。
+- **名簿取込**(`parseRoster`)は申込名簿のテキストを名前とフリガナに分ける。`○クラス名` で区切り、金額(`〜円`)と所属(かっこ書き)を落とす。**フリガナは行の右側からカタカナのみのトークンを拾う**。「井ノ口学　イノクチ　マナブ」のように名前にカタカナが混じると左からでは切り位置を誤るため。名前が空にならないよう、最低1トークンは名前に残す(全カタカナの名前対策)。判定できない見出しは `cls: null` にして、取り込み先を画面で選ばせる。取り込み結果はビブ空欄。
+- 取込画面の作業状態は `ui.imp` に持つ。保存はしないので、リロードすると消える(意図的)。
 - 入力内容は localStorage(`mmc-timing-v1`)に自動保存。「データを保存/読み込み」で JSON ファイルにも書き出せる。通信は一切行わない。
 - **Excel 版との違い**: クラス別・最終リザルトはリザルト表から毎回計算する(「送信」「リザルト作成」に当たるボタンは無い)。手修正はリザルト取込画面の表で行う。
 - 集計規則を意図的に変えた点は2つだけ。同タイムを同順位にしたことと、タイムの無い選手を順位なしにしたこと。
@@ -21,6 +25,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - エントリーにフリガナ列がある。ブックの `エントリーリスト` シートの A:B を貼り付けると、名前で照合して埋まる。
 - 印刷用スタートリストは55人×3列で1ページ(`STARTLIST_PER_PAGE = 165`)。
 - テストは無い。確認するときはヘッドレス Chrome で、iframe 越しに関数を呼ぶ使い捨てページを作る。**実名データを含むのでコミットしない**(`.gitignore` が `*.csv` と `*.json` を除外している)。
+  - 起動例: `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --allow-file-access-from-files --virtual-time-budget=10000 --dump-dom "file://<テストページ>"`。`--allow-file-access-from-files` が無いと iframe に触れない。
+  - `const`/`let` で宣言した `state` や `ui` は `window` に載らないので、`contentWindow.eval('ui')` 経由で触る。`function` 宣言(`parseRoster` など)は `contentWindow.<名前>` で直接呼べる。
+  - 構文チェックだけなら `<script>` の中身を抜き出して `node --check` にかけるのが速い。
 
 ## データの決まりごと
 

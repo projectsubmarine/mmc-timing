@@ -95,6 +95,11 @@ table.list{border-collapse:collapse;width:100%}
 .list tr.sep td{background:#f7f8fa;font-weight:700;color:var(--muted);font-size:12px}
 .list td.best{font-weight:700}
 .empty{color:var(--muted);padding:18px;text-align:center}
+.list tr.warn td{background:var(--warn-bg)}
+.list tr.err td{background:var(--err-bg)}
+.list td.m{color:var(--muted)}
+textarea.roster{width:100%;height:240px;font-family:var(--mono);font-size:12px;
+  border:1px solid var(--line);border-radius:6px;padding:8px;background:#fff;resize:vertical}
 
 /* ---------- 注意の一覧 ---------- */
 .issues{margin:0;padding:0;list-style:none;font-size:13px}
@@ -174,6 +179,7 @@ dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
 <dialog id="dlg"></dialog>
 <input type="file" id="file-json" accept=".json,application/json" hidden>
 <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
+<input type="file" id="file-txt" accept=".txt,text/plain" hidden>
 
 <script>
 'use strict';
@@ -190,14 +196,15 @@ const TIME_RE = /^\d{2}:\d{2}\.\d{2,3}$/;      // Kids は小数2桁
 const STARTLIST_PER_PAGE = 165;                 // 印刷用：55人×3列
 
 const STEPS = [
-  ['entry',  '1 エントリー'],
-  ['start1', '2 スタートリスト1本目'],
-  ['res1',   '3 1本目リザルト'],
-  ['first',  '4 1本目クラス別'],
-  ['start2', '5 スタートリスト2本目'],
-  ['res2',   '6 2本目リザルト'],
-  ['final',  '7 最終リザルト'],
-  ['web',    '8 Web用'],
+  ['import', '1 名簿取込'],
+  ['entry',  '2 エントリー'],
+  ['start1', '3 スタートリスト1本目'],
+  ['res1',   '4 1本目リザルト'],
+  ['first',  '5 1本目クラス別'],
+  ['start2', '6 スタートリスト2本目'],
+  ['res2',   '7 2本目リザルト'],
+  ['final',  '8 最終リザルト'],
+  ['web',    '9 Web用'],
 ];
 
 function emptyState() {
@@ -205,7 +212,11 @@ function emptyState() {
 }
 
 let state = loadState() || emptyState();
-const ui = { step: 'entry', cls: { entry: 0, first: 0, final: 0 } };
+const ui = {
+  step: 'entry',
+  cls: { entry: 0, first: 0, final: 0 },
+  imp: { text: '', groups: null, map: [], replace: true },   // 名簿取込（保存はしない）
+};
 
 //=====================================================================
 // 共通の補助関数
@@ -727,13 +738,176 @@ function updateChrome() {
 
 function render() {
   updateChrome();
-  const view = { entry: viewEntry, start1: () => viewStartList(false), res1: () => viewResult(1),
-                 first: viewFirst, start2: () => viewStartList(true), res2: () => viewResult(2),
-                 final: viewFinal, web: viewWeb }[ui.step];
+  const view = { import: viewImport, entry: viewEntry, start1: () => viewStartList(false),
+                 res1: () => viewResult(1), first: viewFirst, start2: () => viewStartList(true),
+                 res2: () => viewResult(2), final: viewFinal, web: viewWeb }[ui.step];
   $('#view').replaceChildren(...[].concat(view()).filter(Boolean));
 }
 
-// ---------- 1 エントリー ----------
+// ---------- 1 名簿取込 ----------
+//   「○クラス名」で区切られた名簿テキストを、名前とフリガナに分けて取り込む。
+//   1行は「氏名　フリガナ　金額（所属）」を想定し、金額と所属は落とす。
+//   フリガナは行の右側から拾う。「井ノ口学　イノクチ　マナブ」のように名前に
+//   カタカナが混じることがあり、左から探すと切る位置を誤るため。
+
+const CLASS_JA = { エキスパート: 0, スポーツ: 1, ビギナー: 2, ガールズ: 3, ジュニア: 4, キッズ: 5 };
+CLASSES.forEach((c, k) => { CLASS_JA[c.toLowerCase()] = k; });
+
+const KATA_ONLY = /^[゠-ヿ゛゜]+$/;
+const HEAD_RE = /^[○●◯■□◆▼【\[]+[\s　]*/;
+
+// 見出しの文字列からクラスの添字。分からなければ null
+function rosterClassOf(head) {
+  const key = head.replace(/[\s　]/g, '');
+  if (key in CLASS_JA) return CLASS_JA[key];
+  return key.toLowerCase() in CLASS_JA ? CLASS_JA[key.toLowerCase()] : null;
+}
+
+function parseRoster(text) {
+  const groups = [];
+  let cur = null;
+  String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach(raw => {
+    const s = raw.replace(/^[\s　]+|[\s　]+$/g, '');
+    if (!s) return;
+    if (HEAD_RE.test(s)) {
+      const head = s.replace(HEAD_RE, '').replace(/[】\]][\s　]*$/, '').trim();
+      cur = { head, cls: rosterClassOf(head), rows: [] };
+      groups.push(cur);
+      return;
+    }
+    if (!cur) { cur = { head: '', cls: null, rows: [] }; groups.push(cur); }
+    let t = s, affil = '';
+    const m = t.match(/[（(]([^）)]*)[）)]/);
+    if (m) { affil = m[1].trim(); t = t.slice(0, m.index) + t.slice(m.index + m[0].length); }
+    t = t.replace(/[０-９0-9]+[\s　]*円/g, '');
+    const toks = t.split(/[\s　]+/).filter(Boolean);
+    let n = toks.length;
+    while (n > 1 && KATA_ONLY.test(toks[n - 1])) n--;
+    cur.rows.push({ name: toks.slice(0, n).join(''), kana: toks.slice(n).join(''), affil });
+  });
+  return groups.filter(g => g.head || g.rows.length);
+}
+
+function runParse() {
+  ui.imp.groups = parseRoster(ui.imp.text);
+  ui.imp.map = ui.imp.groups.map(g => g.cls);
+  render();
+}
+
+function pickRosterFile() {
+  const input = $('#file-txt');
+  input.onchange = async () => {
+    const file = input.files[0];
+    input.value = '';
+    if (!file) return;
+    ui.imp.text = decodeText(await file.arrayBuffer());
+    runParse();
+  };
+  input.click();
+}
+
+function rosterIssues() {
+  const imp = ui.imp, issues = [];
+  imp.groups.forEach((g, gi) => {
+    if (imp.map[gi] == null && g.rows.length)
+      issues.push(['warn', `「${g.head || '見出しなし'}」の${g.rows.length}人は取り込み先が未指定です（このままでは取り込まれません）。`]);
+  });
+  const noKana = [], byName = new Map();
+  let noName = 0;
+  imp.groups.forEach((g, gi) => {
+    const k = imp.map[gi];
+    if (k == null) return;
+    g.rows.forEach(r => {
+      if (!r.name) { noName++; return; }
+      if (!r.kana) noKana.push(r.name);
+      const key = nameKey(r.name);
+      const hit = byName.get(key) || { name: r.name, cls: [] };
+      hit.cls.push(CLASSES[k]);
+      byName.set(key, hit);
+    });
+  });
+  if (noName) issues.push(['err', `名前を取れなかった行が${noName}件あります。元のテキストを確認してください。`]);
+  if (noKana.length) issues.push(['warn', `フリガナを取れませんでした：${noKana.join('、')}`]);
+  [...byName.values()].filter(v => v.cls.length > 1).forEach(v =>
+    issues.push(['dup', `${v.name} が複数のクラスに入っています（${v.cls.join(' / ')}）。同じ人に2つのビブを与えると集計が合わなくなります。`]));
+  return issues;
+}
+
+function viewImport() {
+  const imp = ui.imp;
+  const ta = h('textarea', { class: 'roster', oninput: e => { imp.text = e.target.value; } });
+  ta.value = imp.text;
+
+  const pastePanel = h('div', { class: 'panel' }, h('h2', {}, '名簿テキストを取り込み'),
+    h('p', { class: 'hint', style: 'margin-top:0' },
+      '「○クラス名」で区切られた名簿をそのまま貼り付けてください。1行は「氏名　フリガナ　金額（所属）」の形を想定しています。金額と所属は取り込みません（エントリーに所属欄が無いため）。ビブは空欄で入ります。'),
+    ta,
+    h('div', { class: 'row', style: 'margin-top:8px' },
+      h('button', { class: 'btn primary', onclick: runParse }, '解析する'),
+      h('button', { class: 'btn', onclick: pickRosterFile }, 'テキストファイルを読み込む'),
+      h('span', { style: 'flex:1' }),
+      imp.text ? h('button', { class: 'btn danger', onclick: () => { imp.text = ''; imp.groups = null; render(); } }, 'クリア') : null));
+
+  if (!imp.groups) return [pastePanel];
+  if (!imp.groups.length)
+    return [pastePanel, h('div', { class: 'panel' }, h('p', { class: 'empty' }, '取り込める行が見つかりませんでした。'))];
+
+  const panels = imp.groups.map((g, gi) => {
+    const sel = h('select');
+    sel.append(h('option', { value: '-1' }, '取り込まない'));
+    CLASSES.forEach((c, k) => sel.append(h('option', { value: String(k) }, c)));
+    sel.value = String(imp.map[gi] ?? -1);
+    sel.onchange = () => { imp.map[gi] = Number(sel.value) < 0 ? null : Number(sel.value); render(); };
+    return h('div', { class: 'panel', style: imp.map[gi] == null ? 'opacity:.55' : null },
+      h('div', { class: 'row' },
+        h('h3', { style: 'margin:0' }, g.head || '(見出しなし)'),
+        h('span', { class: 'chip' }, `${g.rows.length}人`),
+        h('span', { style: 'flex:1' }),
+        h('span', { class: 'hint', style: 'margin:0' }, '取り込み先'), sel),
+      g.rows.length
+        ? h('table', { class: 'list', style: 'margin-top:8px' },
+            h('thead', {}, h('tr', {}, h('th', {}, '名前'), h('th', {}, 'フリガナ'), h('th', {}, '所属（取り込みません）'))),
+            h('tbody', {}, g.rows.map(r => h('tr', { class: !r.name ? 'err' : (!r.kana ? 'warn' : null) },
+              h('td', {}, r.name || '—'), h('td', {}, r.kana || '—'), h('td', { class: 'm' }, r.affil)))))
+        : h('p', { class: 'empty' }, '行がありません'));
+  });
+
+  const total = imp.groups.reduce((n, g, gi) =>
+    n + (imp.map[gi] == null ? 0 : g.rows.filter(r => r.name || r.kana).length), 0);
+  const replace = h('input', { type: 'checkbox' });
+  replace.checked = imp.replace;
+  replace.onchange = () => { imp.replace = replace.checked; };
+
+  const actionPanel = h('div', { class: 'panel' }, h('h2', {}, 'エントリーに取り込む'),
+    issueList(rosterIssues(), '取り込める状態です。'),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('label', {}, replace, ' 取り込むクラスの今のエントリーを置き換える（外すと末尾に追加）'),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'btn primary', disabled: !total, onclick: () => doRosterImport(total) },
+        `${total}人を取り込む`)));
+
+  return [pastePanel, ...panels, actionPanel];
+}
+
+function doRosterImport(total) {
+  const imp = ui.imp;
+  if (!total) return;
+  const add = CLASSES.map(() => []);
+  imp.groups.forEach((g, gi) => {
+    const k = imp.map[gi];
+    if (k == null) return;
+    g.rows.forEach(r => { if (r.name || r.kana) add[k].push({ bib: '', name: r.name, kana: r.kana }); });
+  });
+  add.forEach((a, k) => { if (a.length) state.entries[k] = imp.replace ? a : entryRows(k).concat(a); });
+  save();
+  imp.groups = null;
+  ui.step = 'entry';
+  render();
+  window.scrollTo(0, 0);
+  toast(`${total}人を取り込みました。ビブは空欄です。`);
+}
+
+// ---------- 2 エントリー ----------
 function viewEntry() {
   const k = ui.cls.entry;
   const ev = state.event;
@@ -868,7 +1042,7 @@ function importKanaDialog() {
   });
 }
 
-// ---------- 2・5 スタートリスト ----------
+// ---------- 3・6 スタートリスト ----------
 function viewStartList(second) {
   const label = second ? '2本目' : '1本目';
   const { rows, issues } = buildStartList(second);
@@ -903,7 +1077,7 @@ function viewStartList(second) {
   ];
 }
 
-// ---------- 3・6 リザルト取り込み ----------
+// ---------- 4・7 リザルト取り込み ----------
 function viewResult(run) {
   const key = 'res' + run;
   const rows = state[key];
@@ -993,7 +1167,7 @@ async function importResultCsv(file, run) {
   toast(`${file.name} から${rows.length}件を読み込みました。` + (skipped ? `\n項目数が5未満の行が${skipped}行あったため、読み飛ばしました。` : ''), skipped > 0);
 }
 
-// ---------- 4 1本目クラス別 ----------
+// ---------- 5 1本目クラス別 ----------
 function firstTitle(k) { return k === 0 ? 'Expert 決勝出走順' : `${CLASSES[k]} 1本目`; }
 
 function viewFirst() {
@@ -1015,7 +1189,7 @@ function viewFirst() {
       : h('p', { class: 'empty' }, 'このクラスの1本目リザルトはまだありません。'));
 }
 
-// ---------- 7 最終リザルト ----------
+// ---------- 8 最終リザルト ----------
 function viewFinal() {
   const k = ui.cls.final;
   const { rows, dup1, dup2 } = finalResult(k);
@@ -1044,7 +1218,7 @@ function viewFinal() {
     h('p', { class: 'hint' }, '同タイムは同順位、タイムの無い選手は順位なしで末尾に並びます。'));
 }
 
-// ---------- 8 Web用 ----------
+// ---------- 9 Web用 ----------
 function webLines() {
   const lines = [];
   CLASSES.forEach((c, k) => {
