@@ -186,11 +186,13 @@ dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
 
 //=====================================================================
 // 定数とデータ
-//   ビブの百の位がクラス（1=Expert … 6=Kids）。タイムは "mm:ss.fff" の
+//   ビブの百の位がクラス（CLASS_BIB 参照。1=Expert … 6=Kids、9=OldTimer）。
+//   連番ではないので、添字との変換は必ず CLASS_BIB を通す。タイムは "mm:ss.fff" の
 //   文字列のまま扱い、並べ替えも文字列比較で行う（Excel 版と同じ）。
 //=====================================================================
-const CLASSES = ['Expert', 'Sports', 'Beginner', 'Girls', 'Junior', 'Kids'];
-const RUN_ORDER = [5, 4, 3, 2, 1, 0];          // 出走順：Kids → … → Expert
+const CLASSES = ['Expert', 'Sports', 'Beginner', 'Girls', 'Junior', 'Kids', 'OldTimer'];
+const CLASS_BIB = [1, 2, 3, 4, 5, 6, 9];       // 添字 → ビブの百の位
+const RUN_ORDER = [5, 4, 3, 2, 1, 0, 6];       // 出走順：Kids → … → Expert → OldTimer
 const STORE_KEY = 'mmc-timing-v1';
 const TIME_RE = /^\d{2}:\d{2}\.\d{2,3}$/;      // Kids は小数2桁
 const STARTLIST_PER_PAGE = 165;                 // 印刷用：55人×3列
@@ -208,7 +210,7 @@ const STEPS = [
 ];
 
 function emptyState() {
-  return { version: 1, event: { name: '', date: '' }, entries: [[], [], [], [], [], []], res1: [], res2: [] };
+  return { version: 1, event: { name: '', date: '' }, entries: CLASSES.map(() => []), res1: [], res2: [] };
 }
 
 let state = loadState() || emptyState();
@@ -245,7 +247,7 @@ const str = v => String(v ?? '').trim();
 // ビブからクラスの添字（0～5）。判定できなければ -1（VBA の ClassIndexOf と同じ）
 function classOf(bib) {
   bib = norm(bib);
-  return /^[1-6].{2}$/.test(bib) ? Number(bib[0]) - 1 : -1;
+  return /^\d.{2}$/.test(bib) ? CLASS_BIB.indexOf(Number(bib[0])) : -1;
 }
 
 // ビブの比較：数字同士は数値順、数字は文字より前、空欄は最後
@@ -290,11 +292,12 @@ function sanitizeRows(rows, fields) {
 }
 
 function sanitizeState(s) {
-  if (!s || typeof s !== 'object' || !Array.isArray(s.entries) || s.entries.length !== 6) return null;
+  if (!s || typeof s !== 'object' || !Array.isArray(s.entries) || !s.entries.length) return null;
+  // OldTimer を足す前（6クラス）の保存データも読めるように、足りないクラスは空で補う
   return {
     version: 1,
     event: { name: String(s.event?.name ?? ''), date: String(s.event?.date ?? '') },
-    entries: s.entries.map(rows => sanitizeRows(rows, ['bib', 'name', 'kana'])),
+    entries: CLASSES.map((_, k) => sanitizeRows(s.entries[k], ['bib', 'name', 'kana'])),
     res1: sanitizeRows(s.res1, ['bib', 'name', 'time']),
     res2: sanitizeRows(s.res2, ['bib', 'name', 'time']),
   };
@@ -434,8 +437,8 @@ const entryRows = k => state.entries[k].filter(r => str(r.bib) || str(r.name));
 // 1桁・2桁のビブにクラス番号を付ける（例：Sports の 5 → 205）
 function fixEntryBib(v, k) {
   const b = norm(v);
-  if (/^\d$/.test(b)) return `${k + 1}0${b}`;
-  if (/^\d{2}$/.test(b)) return `${k + 1}${b}`;
+  if (/^\d$/.test(b)) return `${CLASS_BIB[k]}0${b}`;
+  if (/^\d{2}$/.test(b)) return `${CLASS_BIB[k]}${b}`;
   return b;
 }
 
@@ -750,7 +753,7 @@ function render() {
 //   フリガナは行の右側から拾う。「井ノ口学　イノクチ　マナブ」のように名前に
 //   カタカナが混じることがあり、左から探すと切る位置を誤るため。
 
-const CLASS_JA = { エキスパート: 0, スポーツ: 1, ビギナー: 2, ガールズ: 3, ジュニア: 4, キッズ: 5 };
+const CLASS_JA = { エキスパート: 0, スポーツ: 1, ビギナー: 2, ガールズ: 3, ジュニア: 4, キッズ: 5, オールドタイマー: 6 };
 CLASSES.forEach((c, k) => { CLASS_JA[c.toLowerCase()] = k; });
 
 const KATA_ONLY = /^[゠-ヿ゛゜]+$/;
@@ -959,7 +962,7 @@ function viewEntry() {
             state.entries[k] = []; save(); render();
           } } }, 'このクラスを空にする')),
       grid.el,
-      h('p', { class: 'hint' }, 'ビブは1～2桁で入れるとクラス番号が付きます（Sports の 5 → 205）。Enter で下の行へ。Excel の範囲をコピーしてセルに貼り付けると、まとめて入ります。出走順はこの表の並び順です（↑↓で入れ替え）。'),
+      h('p', { class: 'hint' }, `ビブは1～2桁で入れるとクラス番号が付きます（${CLASSES[k]} の 5 → ${CLASS_BIB[k]}05）。Enter で下の行へ。Excel の範囲をコピーしてセルに貼り付けると、まとめて入ります。出走順はこの表の並び順です（↑↓で入れ替え）。`),
       h('div', { class: 'legend' }, h('span', { class: 'err' }, '重複・クラス違い'), h('span', { class: 'warn' }, 'ビブ未入力'))),
     h('div', { class: 'panel' }, h('h2', {}, '確認事項'), issuesBox)];
 }
@@ -987,17 +990,17 @@ function pasteEntriesDialog(k) {
   const replace = h('input', { type: 'checkbox', checked: true });
   openDialog('エントリーをまとめて貼り付け', [
     h('label', {}, one, `${CLASSES[k]} に貼り付け（Bib・Name・フリガナ の2～3列）`),
-    h('label', {}, all, '全クラス一括（Excel の Entry シートの A～L 列、12列）'),
+    h('label', {}, all, `全クラス一括（Bib・Name をクラスの順に横へ並べた ${CLASSES.length * 2} 列。Excel の Entry シートは A～L 列の6クラス分）`),
     ta,
     h('label', {}, replace, '今のエントリーを置き換える（外すと末尾に追加）'),
     h('p', { class: 'hint' }, '見出し行（Bib、Name など）は自動で読み飛ばします。'),
   ], '取り込む', () => {
     const lines = splitTsv(ta.value);
     const isHeader = (b, n) => /^bib$/i.test(b) || /^name$/i.test(n) || CLASSES.includes(b);
-    const add = [[], [], [], [], [], []];
+    const add = CLASSES.map(() => []);
     for (const cells of lines) {
       if (all.checked) {
-        for (let j = 0; j < 6; j++) {
+        for (let j = 0; j < CLASSES.length; j++) {
           const b = cells[j * 2] ?? '', n = cells[j * 2 + 1] ?? '';
           if ((b || n) && !isHeader(b, n)) add[j].push({ bib: fixEntryBib(b, j), name: n, kana: '' });
         }
@@ -1060,8 +1063,8 @@ function viewStartList(second) {
   return [
     h('div', { class: 'panel' }, h('h2', {}, `スタートリスト${label}`),
       h('p', { class: 'hint', style: 'margin:0 0 10px' }, second
-        ? '出走順は Kids → Junior → Girls → Beginner → Sports → Expert。Expert は1本目リザルトのタイムの遅い順（決勝出走順）、他のクラスはエントリーの並び順です。'
-        : '出走順は Kids → Junior → Girls → Beginner → Sports → Expert。各クラスはエントリーの並び順です。'),
+        ? `出走順は ${RUN_ORDER.map(i => CLASSES[i]).join(' → ')}。Expert は1本目リザルトのタイムの遅い順（決勝出走順）、他のクラスはエントリーの並び順です。`
+        : `出走順は ${RUN_ORDER.map(i => CLASSES[i]).join(' → ')}。各クラスはエントリーの並び順です。`),
       h('div', { class: 'chips', style: 'margin-bottom:10px' }, h('span', { class: 'chip' }, `合計 ${rows.length}人`), perClass.map(t => h('span', { class: 'chip' }, t))),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: !rows.length, onclick: () => {
@@ -1184,7 +1187,7 @@ function viewFirst() {
       h('span', { class: 'hint', style: 'margin:0' }, k === 0 ? '予選タイムの遅い順（2本目の出走順）' : 'タイムの速い順'),
       h('span', { style: 'flex:1' }),
       h('button', { class: 'btn', disabled: !list.length, onclick: () => printFirst([k]) }, 'このクラスを印刷'),
-      h('button', { class: 'btn', disabled: !state.res1.length, onclick: () => printFirst([0, 1, 2, 3, 4, 5].filter(i => resultRows(1, i).length)) }, '全クラスを印刷')),
+      h('button', { class: 'btn', disabled: !state.res1.length, onclick: () => printFirst(CLASSES.map((_, i) => i).filter(i => resultRows(1, i).length)) }, '全クラスを印刷')),
     list.length
       ? h('table', { class: 'list' },
           h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:70px' }, 'NUMBER'), h('th', { style: 'width:80px' }, 'BIB'), h('th', {}, 'NAME'), h('th', {}, 'Time'))),
@@ -1208,7 +1211,7 @@ function viewFinal() {
       h('span', { class: 'hint', style: 'margin:0' }, ex ? '決勝（2本目）タイムで順位' : '2本のうち速い方（BEST TIME）で順位'),
       h('span', { style: 'flex:1' }),
       h('button', { class: 'btn', disabled: !rows.length, onclick: () => printFinal([k]) }, 'このクラスを印刷'),
-      h('button', { class: 'btn', onclick: () => printFinal([0, 1, 2, 3, 4, 5].filter(i => finalResult(i).rows.length)) }, '全クラスを印刷')),
+      h('button', { class: 'btn', onclick: () => printFinal(CLASSES.map((_, i) => i).filter(i => finalResult(i).rows.length)) }, '全クラスを印刷')),
     issues.length ? h('div', { style: 'margin-bottom:10px' }, issueList(issues)) : null,
     rows.length
       ? h('table', { class: 'list' },

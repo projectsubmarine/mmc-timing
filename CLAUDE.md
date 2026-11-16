@@ -9,6 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **公開リポジトリなので実名を一切置かないこと。** データファイルだけでなく、**コード中の例文・プレースホルダ・コメント・README の例・コミットメッセージも対象**。過去に名簿の実名をプレースホルダに使ってしまい公開した。例が必要なときは架空の名前(山田太郎、佐藤花、井ノ口学など)を使う。
 
 - 公開 URL: https://projectsubmarine.github.io/mmc-timing/(`main` への push で自動更新)
+- **このブランチ(`MMC44`)は OldTimer クラス(ビブ 9xx)を追加した版。** `main` は6クラスのまま。GitHub Pages が配信するのは `main` なので、このブランチの内容は公開 URL には出ない。確認するにはローカルの `index.html` を直接開く。
+- クラスを増減したときに直す箇所は `CLASSES` / `CLASS_BIB` / `RUN_ORDER` / `CLASS_JA` の4つ。それ以外はこれらから導いてあるので触らなくてよい。6クラス時代の保存データは `sanitizeState` が足りないクラスを空で補って読む。
 - 元になった Excel ブック: ローカルの `../Excel-File-Development/`(非公開。実名データを含むので公開しない)
 
 もとは VBA マクロ付きの Excel ブックで運用していた処理を移植したもの。集計規則を変えるときは、ブック側の `Module1_修正版.bas` と食い違わないか確認する。
@@ -34,8 +36,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ブック側と共通。変えるときは両方そろえる。
 
-- クラスは6つで、ビブ番号の百の位がクラスを表す: 1=Expert、2=Sports、3=Beginner、4=Girls、5=Junior、6=Kids。クラス判定はビブだけで行う。
-- 出走順は Kids → Junior → Girls → Beginner → Sports → Expert。
+- クラスは7つで、ビブ番号の百の位がクラスを表す: 1=Expert、2=Sports、3=Beginner、4=Girls、5=Junior、6=Kids、**9=OldTimer**。クラス判定はビブだけで行う。
+- **百の位は連番ではない**(OldTimer は 7 ではなく 9)。添字との変換は必ず `CLASS_BIB`(`[1,2,3,4,5,6,9]`)を通すこと。`百の位 - 1` という計算を書くと壊れる。7xx と 8xx はどのクラスにもならない(`classOf` が -1)。
+- 出走順は `RUN_ORDER`(`[5,4,3,2,1,0,6]`) = Kids → Junior → Girls → Beginner → Sports → Expert → OldTimer。画面の説明文は `RUN_ORDER` から組み立てているので、順番を変えたら文面も自動で追従する。
+- OldTimer は Expert と違い通常クラス扱い(2本走ってベストタイムで順位)。Expert だけの予選・決勝方式は `k === 0` で分岐している。
 - Expert だけ方式が違う。1本目が予選、2本目が決勝で、決勝の出走順は予選タイムの遅い順、順位は決勝タイムで決まる。他のクラスは2本のうち速い方(ベストタイム)で順位が決まる。
 - タイムは `mm:ss.fff`(例 `00:23.031`)の文字列のまま保持し、比較も文字列で行う。数値や時刻型に変換しないこと。
 - Kids だけ計測方法が異なるため小数2桁(`00:16.29`)。これは仕様。分と秒が2桁ゼロ埋めであれば、小数の桁数が違っても文字列比較は数値順と一致する。ただし秒がゼロ埋めされていない値(`00:5.595` など)が混ざると比較が狂う。
