@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# エディタ
+.sublime-workspace
+*.swp
+
+# ログ・一時ファイル
+*.log
+*.tmp
+*.bak
+
+# 大会データ(実名を含むのでコミットしない)
+*.csv
+*.json
+!package.json

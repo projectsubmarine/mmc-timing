@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMC タイム集計</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#fff; --ink:#1d2330; --muted:#677084; --line:#d9dde5;
+  --accent:#2f6fde; --accent-ink:#fff; --accent-soft:#e6eefc;
+  --err:#c62f2f; --err-bg:#fde8e8; --warn:#9a6700; --warn-bg:#fff4d6;
+  --dup-bg:#f3e8ff; --dup:#7a3fb8; --info-bg:#e9f3fb; --info:#2a6496; --ok:#237a3c;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+
+/* ---------- 画面の骨組み ---------- */
+.topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;background:#1d2330;color:#fff}
+.topbar h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.02em}
+.topbar .ev{color:#b8c1d4;font-size:13px}
+.topbar .sp{flex:1}
+.topbar button{background:#323b4d;border:1px solid #485267;color:#fff;border-radius:6px;padding:5px 10px;font-size:13px}
+.topbar button:hover{background:#3d475c}
+.topbar button.danger{border-color:#7d3a3a}
+.steps{display:flex;gap:4px;overflow-x:auto;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.steps button{flex:none;border:1px solid transparent;background:none;border-radius:6px;padding:6px 10px;color:var(--muted);white-space:nowrap}
+.steps button:hover{background:var(--bg)}
+.steps button.on{background:var(--accent-soft);color:var(--accent);border-color:#c6d6f7;font-weight:700}
+.steps .badge{display:inline-block;min-width:18px;margin-left:5px;padding:0 5px;border-radius:9px;background:var(--bg);font-size:11px;text-align:center;color:var(--muted)}
+.steps button.on .badge{background:#fff}
+main{max-width:1120px;margin:0 auto;padding:16px}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.panel h2{font-size:15px;margin:0 0 10px}
+.panel h3{font-size:14px;margin:12px 0 6px}
+.hint{color:var(--muted);font-size:13px;margin:4px 0 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.field input{font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;color:var(--ink);min-width:160px}
+
+.btn{border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 12px}
+.btn:hover{background:var(--bg)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.danger{color:var(--err)}
+.btn:disabled{opacity:.45;cursor:default}
+
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.tab{border:1px solid var(--line);background:#fff;border-radius:16px;padding:4px 12px}
+.tab.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.tab .cnt{margin-left:6px;font-size:12px;opacity:.7}
+
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--bg);border-radius:12px;padding:2px 10px;font-size:12px}
+.chip.err{background:var(--err-bg);color:var(--err)}
+
+/* ---------- 編集できる表 ---------- */
+.gridwrap{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:8px}
+table.grid{border-collapse:collapse;width:100%}
+.grid th{position:sticky;top:0;z-index:1;background:#eef0f4;text-align:left;font-size:12px;font-weight:600;color:var(--muted);padding:5px 6px;border-bottom:1px solid var(--line)}
+.grid td{border-bottom:1px solid #edf0f4;padding:0}
+.grid td.num{width:40px;text-align:right;padding-right:8px;color:var(--muted);font-size:12px}
+.grid input{width:100%;border:0;background:transparent;padding:6px 6px;outline:none}
+.grid input:focus{background:#fff;box-shadow:inset 0 0 0 2px var(--accent)}
+.grid input.mono{font-family:var(--mono)}
+.grid td.ops{width:1%;white-space:nowrap;padding:0 4px}
+.grid .op{border:0;background:none;color:var(--muted);padding:2px 5px;border-radius:4px}
+.grid .op:hover{background:var(--bg);color:var(--ink)}
+.grid .op.del:hover{color:var(--err)}
+.grid tr.err td{background:var(--err-bg)}
+.grid tr.warn td{background:var(--warn-bg)}
+.grid tr.dup td{background:var(--dup-bg)}
+.grid tr.info td{background:var(--info-bg)}
+.grid tr[title] td.num::after{content:" ●";font-size:9px}
+.grid tr.err td.num{color:var(--err)}
+.grid tr.warn td.num{color:var(--warn)}
+.grid tr.dup td.num{color:var(--dup)}
+.grid tr.info td.num{color:var(--info)}
+
+/* ---------- 表示用の表 ---------- */
+table.list{border-collapse:collapse;width:100%}
+.list th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);padding:5px 8px;border-bottom:1px solid var(--line);background:#f7f8fa}
+.list td{padding:5px 8px;border-bottom:1px solid #edf0f4}
+.list td.t{font-family:var(--mono)}
+.list td.r,.list th.r{text-align:right}
+.list tr.sep td{background:#f7f8fa;font-weight:700;color:var(--muted);font-size:12px}
+.list td.best{font-weight:700}
+.empty{color:var(--muted);padding:18px;text-align:center}
+
+/* ---------- 注意の一覧 ---------- */
+.issues{margin:0;padding:0;list-style:none;font-size:13px}
+.issues li{padding:4px 8px;border-radius:5px;margin-bottom:3px}
+.issues li.err{background:var(--err-bg);color:var(--err)}
+.issues li.warn{background:var(--warn-bg);color:var(--warn)}
+.issues li.dup{background:var(--dup-bg);color:var(--dup)}
+.issues li.info{background:var(--info-bg);color:var(--info)}
+.ok{color:var(--ok);font-size:13px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:6px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.legend .err::before{background:var(--err-bg);border:1px solid var(--err)}
+.legend .warn::before{background:var(--warn-bg);border:1px solid var(--warn)}
+.legend .dup::before{background:var(--dup-bg);border:1px solid var(--dup)}
+.legend .info::before{background:var(--info-bg);border:1px solid var(--info)}
+
+.drop{border:2px dashed var(--line);border-radius:10px;padding:16px;text-align:center;color:var(--muted)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+dialog{border:0;border-radius:12px;padding:0;width:min(640px,calc(100vw - 32px));box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(20,25,35,.45)}
+.dlg-h{padding:14px 18px;border-bottom:1px solid var(--line);font-weight:700}
+.dlg-b{padding:14px 18px}
+.dlg-f{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+dialog textarea{width:100%;height:220px;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;padding:8px}
+dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
+
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:min(560px,calc(100vw - 32px));
+  background:#1d2330;color:#fff;border-radius:8px;padding:10px 16px;font-size:13px;white-space:pre-line;
+  box-shadow:0 8px 30px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+#toast.err{background:var(--err)}
+
+/* ---------- 印刷 ---------- */
+#print-root{display:none}
+@page{size:A4 portrait;margin:19mm 6mm}
+@media print{
+  body{background:#fff}
+  .app,#toast,dialog{display:none!important}
+  #print-root{display:block;font-family:"MS PGothic","ＭＳ Ｐゴシック","Hiragino Kaku Gothic ProN",sans-serif;color:#000}
+  .page{break-after:page}
+  .page:last-child{break-after:auto}
+}
+.p-table{border-collapse:collapse;width:100%;font-size:11pt}
+.p-table th,.p-table td{border:0.5pt solid #000;padding:0 2mm;height:7mm}
+.p-table thead .p-head td{border:0;height:auto;padding:0 0 3mm}
+.p-table th{font-weight:normal;height:6mm;background:#eee;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.p-table td.c{text-align:center}
+.p-table td.t{font-family:inherit}
+.p-hd{display:flex;justify-content:space-between;align-items:flex-end}
+.p-hd .l{font-size:16pt;font-weight:bold}
+.p-hd .l small{display:block;font-size:10pt;font-weight:normal}
+.p-hd .r{text-align:right;font-size:9pt}
+.p-sl-title{font-size:15pt;font-weight:bold;height:10mm}
+.p-sl{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5pt}
+.p-sl td{border:0.5pt solid #000;height:4.3mm;padding:0 1mm;white-space:nowrap;overflow:hidden}
+.p-sl td.b{text-align:center}
+.p-sl td.gap{border:0;width:1.5mm}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1>MMC タイム集計</h1>
+    <span class="ev" id="ev-label"></span>
+    <span class="sp"></span>
+    <button id="btn-save" title="大会データ一式を JSON ファイルに保存します">データを保存</button>
+    <button id="btn-load" title="保存した JSON ファイルを読み込みます">データを読み込み</button>
+    <button id="btn-clear" class="danger" title="エントリー以外を消します">リザルトをクリア</button>
+    <button id="btn-reset" class="danger" title="エントリーも含めてすべて消します">すべて消去</button>
+  </header>
+  <nav class="steps" id="steps"></nav>
+  <main id="view"></main>
+</div>
+<div id="print-root"></div>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+<input type="file" id="file-json" accept=".json,application/json" hidden>
+<input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
+
+<script>
+'use strict';
+
+//=====================================================================
+// 定数とデータ
+//   ビブの百の位がクラス（1=Expert … 6=Kids）。タイムは "mm:ss.fff" の
+//   文字列のまま扱い、並べ替えも文字列比較で行う（Excel 版と同じ）。
+//=====================================================================
+const CLASSES = ['Expert', 'Sports', 'Beginner', 'Girls', 'Junior', 'Kids'];
+const RUN_ORDER = [5, 4, 3, 2, 1, 0];          // 出走順：Kids → … → Expert
+const STORE_KEY = 'mmc-timing-v1';
+const TIME_RE = /^\d{2}:\d{2}\.\d{2,3}$/;      // Kids は小数2桁
+const STARTLIST_PER_PAGE = 165;                 // 印刷用：55人×3列
+
+const STEPS = [
+  ['entry',  '1 エントリー'],
+  ['start1', '2 スタートリスト1本目'],
+  ['res1',   '3 1本目リザルト'],
+  ['first',  '4 1本目クラス別'],
+  ['start2', '5 スタートリスト2本目'],
+  ['res2',   '6 2本目リザルト'],
+  ['final',  '7 最終リザルト'],
+  ['web',    '8 Web用'],
+];
+
+function emptyState() {
+  return { version: 1, event: { name: '', date: '' }, entries: [[], [], [], [], [], []], res1: [], res2: [] };
+}
+
+let state = loadState() || emptyState();
+const ui = { step: 'entry', cls: { entry: 0, first: 0, final: 0 } };
+
+//=====================================================================
+// 共通の補助関数
+//=====================================================================
+const $ = (sel, root = document) => root.querySelector(sel);
+
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : String(c));
+  }
+  return el;
+}
+
+// 全角数字などを半角にして前後の空白を除く（ビブ・タイム用）
+const norm = v => String(v ?? '').normalize('NFKC').trim();
+const str = v => String(v ?? '').trim();
+
+// ビブからクラスの添字（0～5）。判定できなければ -1（VBA の ClassIndexOf と同じ）
+function classOf(bib) {
+  bib = norm(bib);
+  return /^[1-6].{2}$/.test(bib) ? Number(bib[0]) - 1 : -1;
+}
+
+// ビブの比較：数字同士は数値順、数字は文字より前、空欄は最後
+function cmpBib(a, b) {
+  a = norm(a); b = norm(b);
+  if (!a || !b) return (!a) - (!b);
+  const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// タイムの比較：文字列比較（大文字小文字は区別しない）。空欄は昇順・降順とも最後
+function cmpTime(a, b, desc = false) {
+  a = str(a); b = str(b);
+  if (!a || !b) return (!a) - (!b);
+  const A = a.toUpperCase(), B = b.toUpperCase();
+  const r = A < B ? -1 : A > B ? 1 : 0;
+  return desc ? -r : r;
+}
+
+const sortBy = (arr, cmp) => arr.slice().sort(cmp);   // Array.prototype.sort は安定ソート
+
+function countBy(values) {
+  const m = new Map();
+  for (const v of values) if (v) m.set(v, (m.get(v) || 0) + 1);
+  return m;
+}
+
+function formatDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  return m ? `${m[1]}/${Number(m[2])}/${Number(m[3])}` : '';
+}
+
+//=====================================================================
+// 保存（ブラウザ内に自動保存＋JSON ファイル）
+//=====================================================================
+function sanitizeRows(rows, fields) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(r => r && typeof r === 'object')
+    .map(r => Object.fromEntries(fields.map(f => [f, String(r[f] ?? '')])));
+}
+
+function sanitizeState(s) {
+  if (!s || typeof s !== 'object' || !Array.isArray(s.entries) || s.entries.length !== 6) return null;
+  return {
+    version: 1,
+    event: { name: String(s.event?.name ?? ''), date: String(s.event?.date ?? '') },
+    entries: s.entries.map(rows => sanitizeRows(rows, ['bib', 'name', 'kana'])),
+    res1: sanitizeRows(s.res1, ['bib', 'name', 'time']),
+    res2: sanitizeRows(s.res2, ['bib', 'name', 'time']),
+  };
+}
+
+function loadState() {
+  try { return sanitizeState(JSON.parse(localStorage.getItem(STORE_KEY))); }
+  catch (e) { return null; }
+}
+
+let saveFailed = false;
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    saveFailed = false;
+  } catch (e) {
+    if (!saveFailed) toast('ブラウザ内への保存に失敗しました。「データを保存」でファイルに保存してください。', true);
+    saveFailed = true;
+  }
+  updateChrome();
+}
+
+//=====================================================================
+// 文字コード：CSV は Shift-JIS（CP932）。ブラウザは Shift-JIS で書き出せないので、
+// デコーダーから逆引き表を作って変換する
+//=====================================================================
+let sjisTable = null;
+function sjisMap() {
+  if (sjisTable) return sjisTable;
+  const dec = new TextDecoder('shift_jis');
+  const m = new Map([['¥', [0x5C]], ['‾', [0x7E]], ['−', [0x81, 0x7C]]]);
+  for (let b = 0xA1; b <= 0xDF; b++) m.set(dec.decode(new Uint8Array([b])), [b]);
+  for (let lead = 0x81; lead <= 0xFC; lead++) {
+    if (lead >= 0xA0 && lead <= 0xDF) continue;
+    // NEC選定IBM拡張（ED, EE）と外字領域（F0～F9）は書き出しに使わない（Windows と同じ選び方）
+    if (lead === 0xED || lead === 0xEE || (lead >= 0xF0 && lead <= 0xF9)) continue;
+    for (let t = 0x40; t <= 0xFC; t++) {
+      if (t === 0x7F) continue;
+      const s = dec.decode(new Uint8Array([lead, t]));
+      if (s.length === 1 && s !== '�' && !m.has(s)) m.set(s, [lead, t]);
+    }
+  }
+  return (sjisTable = m);
+}
+
+// 変換できない文字は "?" にして bad に集める
+function encodeSjis(text) {
+  const map = sjisMap();
+  const out = [], bad = new Set();
+  for (const ch of text) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) { out.push(c); continue; }
+    const b = map.get(ch);
+    if (b) out.push(...b);
+    else { out.push(0x3F); bad.add(ch); }
+  }
+  return { bytes: new Uint8Array(out), bad };
+}
+
+// UTF-8 として正しければ UTF-8、そうでなければ Shift-JIS として読む
+function decodeText(buf) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); }
+  catch (e) { return new TextDecoder('shift_jis').decode(buf); }
+}
+
+// CSV の1行を項目に分解する（"～" で囲まれた項目に対応）
+function parseCsvLine(s) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') { cur += '"'; i++; } else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function download(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = h('a', { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// Shift-JIS の CSV を保存する。変換できない文字があれば確認する
+function downloadSjisCsv(name, lines) {
+  const text = lines.map(cells => cells.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  const { bytes, bad } = encodeSjis(text);
+  if (bad.size && !confirm(`Shift-JIS に変換できない文字があります：${[...bad].join(' ')}\n` +
+                           `「?」に置き換えて保存しますか？`)) return false;
+  download(name, bytes, 'text/csv');
+  return true;
+}
+
+function csvCell(v) {
+  v = String(v ?? '');
+  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch (e) {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0' });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
+let toastTimer = null;
+function toast(msg, isErr = false) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, isErr ? 7000 : 3500);
+}
+
+//=====================================================================
+// 集計ロジック（VBA マクロの移植）
+//=====================================================================
+
+// Entry：1クラス分の入力済みの行（ビブか名前のどちらかがある行）
+const entryRows = k => state.entries[k].filter(r => str(r.bib) || str(r.name));
+
+// 1桁・2桁のビブにクラス番号を付ける（例：Sports の 5 → 205）
+function fixEntryBib(v, k) {
+  const b = norm(v);
+  if (/^\d$/.test(b)) return `${k + 1}0${b}`;
+  if (/^\d{2}$/.test(b)) return `${k + 1}${b}`;
+  return b;
+}
+
+// SortEntryList：ビブを整形して並べ替え、空行を詰める
+function sortEntries(k) {
+  const rows = entryRows(k).map(r => ({ ...r, bib: fixEntryBib(r.bib, k) }));
+  state.entries[k] = sortBy(rows, (a, b) => cmpBib(a.bib, b.bib));
+}
+
+// CheckEntryClass：エントリーの問題点
+function entryIssues() {
+  const list = [];
+  CLASSES.forEach((c, k) => {
+    const rows = entryRows(k);
+    const cnt = countBy(rows.map(r => norm(r.bib)));
+    for (const r of rows) {
+      const b = norm(r.bib);
+      if (!b) list.push(['warn', `${c}：ビブ未入力（${str(r.name)}）`]);
+      else if (classOf(b) !== k) list.push(['err', `${c}：ビブ ${b} はこのクラスの番号ではありません`]);
+    }
+    const dup = [...cnt].filter(([, n]) => n > 1).map(([b]) => b);
+    if (dup.length) list.push(['err', `${c}：ビブが重複しています（${dup.join('、')}）`]);
+  });
+  return list;
+}
+
+// エントリーのフリガナ（ビブで引き、無ければ名前で引く）
+function kanaLookup() {
+  const byBib = new Map(), byName = new Map();
+  for (const rows of state.entries) for (const r of rows) {
+    const kana = str(r.kana);
+    if (!kana) continue;
+    if (norm(r.bib)) byBib.set(norm(r.bib), kana);
+    if (str(r.name)) byName.set(nameKey(r.name), kana);
+  }
+  return (bib, name) => byBib.get(norm(bib)) || byName.get(nameKey(name)) || '';
+}
+const nameKey = s => String(s ?? '').replace(/[\s　]/g, '');
+
+// リザルトのうち指定クラスの行（入力順）
+const resultRows = (run, k) => state['res' + run].filter(r => classOf(r.bib) === k);
+
+// 「～1本目」：タイム順。Expert は決勝出走順（予選タイムの遅い順）
+function firstRunList(k) {
+  return sortBy(resultRows(1, k), (a, b) => cmpTime(a.time, b.time, k === 0));
+}
+
+// BuildStartList：出走リスト（2本目の Expert だけ予選タイムの遅い順）
+function buildStartList(second) {
+  const rows = [], issues = [];
+  for (const k of RUN_ORDER) {
+    if (second && k === 0) {
+      const ex = firstRunList(0);
+      if (!ex.length) issues.push(['err', 'Expert の1本目リザルトがありません。2本目の Expert は1本目タイムの遅い順に並べるため、先に1本目リザルトを取り込んでください。']);
+      for (const r of ex) rows.push({ bib: norm(r.bib), name: str(r.name), k });
+    } else {
+      for (const r of entryRows(k)) {
+        if (!norm(r.bib)) issues.push(['warn', `${CLASSES[k]}：ビブ未入力（${str(r.name)}）。ビブ空欄のまま出走リストに入ります。`]);
+        rows.push({ bib: norm(r.bib), name: str(r.name), k });
+      }
+    }
+  }
+  return { rows, issues };
+}
+
+// BuildResult：1本目と2本目をビブで突き合わせ、順位を付ける。
+// 重複したビブは下の行のタイムを採用する（Excel 版と同じ）
+function finalResult(k) {
+  const r1 = sortBy(resultRows(1, k), (a, b) => cmpBib(a.bib, b.bib));
+  const r2 = sortBy(resultRows(2, k), (a, b) => cmpBib(a.bib, b.bib));
+  const out = [], idx = new Map(), seen2 = new Set(), dup1 = new Set(), dup2 = new Set();
+
+  for (const r of r1) {
+    const key = norm(r.bib);
+    let o = idx.get(key);
+    if (!o) { o = { bib: key, name: '', t1: '', t2: '' }; idx.set(key, o); out.push(o); }
+    else dup1.add(key);
+    o.name = str(r.name);
+    o.t1 = str(r.time);
+  }
+  for (const r of r2) {
+    const key = norm(r.bib);
+    let o = idx.get(key);
+    if (!o) { o = { bib: key, name: str(r.name), t1: '', t2: '' }; idx.set(key, o); out.push(o); }
+    else if (seen2.has(key)) dup2.add(key);
+    seen2.add(key);
+    o.t2 = str(r.time);
+  }
+
+  // Expert は決勝タイム、他は速い方（BEST TIME）で順位を決める
+  for (const o of out) {
+    o.best = k === 0 ? '' : bestOf(o.t1, o.t2);
+    o.key = k === 0 ? o.t2 : o.best;
+  }
+  const rows = sortBy(out, (a, b) => cmpTime(a.key, b.key));
+
+  // 同タイムは同順位。タイムが無い選手は順位なし
+  let rank = 0;
+  rows.forEach((o, i) => {
+    if (!o.key) { o.rank = ''; return; }
+    if (i === 0 || cmpTime(o.key, rows[i - 1].key) !== 0) rank = i + 1;
+    o.rank = rank;
+  });
+  return { rows, dup1: [...dup1], dup2: [...dup2] };
+}
+
+function bestOf(a, b) {
+  if (!a) return b || '';
+  if (!b) return a;
+  return cmpTime(a, b) <= 0 ? a : b;
+}
+
+// リザルトの問題点（行ごとの印と一覧）
+function analyzeResults(run) {
+  const rows = state['res' + run];
+  const cnt = countBy(rows.map(r => norm(r.bib)));
+  const entered = new Set(state.entries.flat().map(r => norm(r.bib)).filter(Boolean));
+  const marks = rows.map(r => {
+    const b = norm(r.bib);
+    if (!b && !str(r.name) && !str(r.time)) return null;
+    if (classOf(b) < 0) return { cls: 'err', title: 'ビブからクラスを判定できません（どのクラスにも入りません）' };
+    if (cnt.get(b) > 1) return { cls: 'dup', title: '同じビブが複数行あります（下の行のタイムが採用されます）' };
+    const t = str(r.time);
+    if (t && !TIME_RE.test(norm(t))) return { cls: 'warn', title: 'タイムが mm:ss.fff 形式ではありません' };
+    if (!entered.has(b)) return { cls: 'info', title: 'エントリーに無いビブです' };
+    return null;
+  });
+
+  const issues = [];
+  const unmatched = [], badTime = [], notEntered = [];
+  rows.forEach((r, i) => {
+    const m = marks[i];
+    if (!m) return;
+    const b = norm(r.bib);
+    if (m.cls === 'err') unmatched.push(`${i + 1}行目（ビブ「${b}」）`);
+    if (str(r.time) && !TIME_RE.test(norm(r.time))) badTime.push(`${b || '?'}「${str(r.time)}」`);
+    if (classOf(b) >= 0 && !entered.has(b)) notEntered.push(b);
+  });
+  const dup = [...cnt].filter(([, n]) => n > 1).map(([b]) => b);
+  if (unmatched.length) issues.push(['err', `ビブからクラスを判定できない行：${unmatched.join('、')}`]);
+  if (dup.length) issues.push(['dup', `ビブが重複しています：${dup.join('、')}（下の行のタイムが採用されます。不要な行を消してください）`]);
+  if (badTime.length) issues.push(['warn', `mm:ss.fff 形式でないタイム：${badTime.join('、')}`]);
+  if (notEntered.length) issues.push(['info', `エントリーに無いビブ：${[...new Set(notEntered)].join('、')}`]);
+
+  // 出走予定なのにリザルトに無い選手（2本目の Expert は1本目リザルトの選手が対象）
+  const got = new Set(rows.map(r => norm(r.bib)));
+  const expected = buildStartList(run === 2).rows.filter(r => r.bib);
+  const missing = expected.filter(r => !got.has(r.bib)).map(r => `${r.bib} ${r.name}`);
+  if (rows.length && missing.length) issues.push(['info', `リザルトに無い選手（DNS？）：${missing.join('、')}`]);
+  return { marks, issues };
+}
+
+//=====================================================================
+// 編集できる表
+//   cols: [{ key, label, width, mono, fix(value, rowIndex) }]
+//   analyze(): 行ごとの { cls, title } または null の配列
+//=====================================================================
+function makeGrid({ rows, cols, newRow, analyze, onEdit, reorder = false, numbered = true }) {
+  const tbody = h('tbody');
+  const table = h('table', { class: 'grid' },
+    h('thead', {}, h('tr', {},
+      numbered && h('th', {}, '#'),
+      cols.map(c => h('th', { style: c.width ? `width:${c.width}` : null }, c.label)),
+      h('th', {}))),
+    tbody);
+  const wrap = h('div', { class: 'gridwrap' }, table);
+
+  const rowEl = (r, i) => h('tr', { 'data-i': i },
+    numbered && h('td', { class: 'num' }, i + 1),
+    cols.map(c => {
+      const inp = h('input', { class: c.mono ? 'mono' : null, 'data-key': c.key, autocomplete: 'off', spellcheck: 'false' });
+      inp.value = r[c.key] ?? '';
+      return h('td', {}, inp);
+    }),
+    h('td', { class: 'ops' },
+      reorder && h('button', { class: 'op', 'data-op': 'up', title: '上へ', tabindex: -1 }, '↑'),
+      reorder && h('button', { class: 'op', 'data-op': 'down', title: '下へ', tabindex: -1 }, '↓'),
+      h('button', { class: 'op del', 'data-op': 'del', title: 'この行を削除', tabindex: -1 }, '×')));
+
+  function render(focus) {
+    tbody.replaceChildren(...rows.map(rowEl));
+    refresh();
+    if (focus) {
+      const inp = tbody.querySelector(`tr[data-i="${focus[0]}"] input[data-key="${focus[1]}"]`);
+      if (inp) { inp.focus(); inp.select(); }
+    }
+  }
+
+  function refresh() {
+    const marks = analyze ? analyze() : [];
+    tbody.querySelectorAll('tr').forEach((tr, i) => {
+      const m = marks[i];
+      tr.className = m ? m.cls : '';
+      if (m) tr.title = m.title; else tr.removeAttribute('title');
+    });
+  }
+
+  const pos = el => {
+    const tr = el.closest('tr');
+    return tr ? [Number(tr.dataset.i), el.dataset.key] : null;
+  };
+  const colOf = key => cols.find(c => c.key === key);
+  const edited = () => { onEdit(); refresh(); };
+
+  tbody.addEventListener('input', e => {
+    const p = pos(e.target);
+    if (!p) return;
+    rows[p[0]][p[1]] = e.target.value;
+    edited();
+  });
+  tbody.addEventListener('change', e => {
+    const p = pos(e.target);
+    if (!p) return;
+    const c = colOf(p[1]);
+    if (c.fix) {
+      const v = c.fix(e.target.value, p[0]);
+      if (v !== e.target.value) { e.target.value = v; rows[p[0]][p[1]] = v; edited(); }
+    }
+  });
+  // Enter で下の行へ（最終行なら行を追加）
+  tbody.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    const p = pos(e.target);
+    if (!p) return;
+    e.preventDefault();
+    e.target.dispatchEvent(new Event('change', { bubbles: true }));
+    const next = p[0] + (e.shiftKey ? -1 : 1);
+    if (next < 0) return;
+    if (next >= rows.length) { rows.push(newRow()); onEdit(); render([next, p[1]]); return; }
+    const inp = tbody.querySelector(`tr[data-i="${next}"] input[data-key="${p[1]}"]`);
+    if (inp) { inp.focus(); inp.select(); }
+  });
+  // Excel からの複数セル貼り付け：カーソル位置から右下へ埋める
+  tbody.addEventListener('paste', e => {
+    const p = pos(e.target);
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    if (!p || !/[\t\n]/.test(text)) return;
+    e.preventDefault();
+    const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+    const c0 = cols.findIndex(c => c.key === p[1]);
+    lines.forEach((line, di) => {
+      const i = p[0] + di;
+      while (rows.length <= i) rows.push(newRow());
+      line.split('\t').forEach((cell, dj) => {
+        const c = cols[c0 + dj];
+        if (c) rows[i][c.key] = c.fix ? c.fix(cell, i) : cell.trim();
+      });
+    });
+    onEdit();
+    render();
+    toast(`${lines.length}行を貼り付けました。`);
+  });
+  tbody.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-op]');
+    if (!btn) return;
+    const i = Number(btn.closest('tr').dataset.i);
+    const op = btn.dataset.op;
+    if (op === 'del') rows.splice(i, 1);
+    else if (op === 'up' && i > 0) [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
+    else if (op === 'down' && i < rows.length - 1) [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]];
+    else return;
+    onEdit();
+    render();
+  });
+
+  render();
+  return {
+    el: wrap,
+    render,
+    addRow() { rows.push(newRow()); onEdit(); render([rows.length - 1, cols[0].key]); },
+  };
+}
+
+//=====================================================================
+// 画面
+//=====================================================================
+function issueList(issues, okText) {
+  if (!issues.length) return okText ? h('p', { class: 'ok' }, '✓ ' + okText) : null;
+  return h('ul', { class: 'issues' }, issues.map(([cls, text]) => h('li', { class: cls }, text)));
+}
+
+function classTabs(key, count) {
+  return h('div', { class: 'tabs' }, CLASSES.map((c, k) =>
+    h('button', { class: 'tab' + (ui.cls[key] === k ? ' on' : ''), onclick: () => { ui.cls[key] = k; render(); } },
+      c, h('span', { class: 'cnt' }, count(k)))));
+}
+
+function updateChrome() {
+  const ev = state.event;
+  $('#ev-label').textContent = [ev.name, formatDate(ev.date)].filter(Boolean).join('　');
+  const badge = {
+    entry: state.entries.reduce((n, _, k) => n + entryRows(k).length, 0),
+    res1: state.res1.length,
+    res2: state.res2.length,
+  };
+  $('#steps').replaceChildren(...STEPS.map(([id, label]) =>
+    h('button', { class: ui.step === id ? 'on' : null, onclick: () => { ui.step = id; render(); window.scrollTo(0, 0); } },
+      label, badge[id] ? h('span', { class: 'badge' }, badge[id]) : null)));
+}
+
+function render() {
+  updateChrome();
+  const view = { entry: viewEntry, start1: () => viewStartList(false), res1: () => viewResult(1),
+                 first: viewFirst, start2: () => viewStartList(true), res2: () => viewResult(2),
+                 final: viewFinal, web: viewWeb }[ui.step];
+  $('#view').replaceChildren(...[].concat(view()).filter(Boolean));
+}
+
+// ---------- 1 エントリー ----------
+function viewEntry() {
+  const k = ui.cls.entry;
+  const ev = state.event;
+  const issuesBox = h('div');
+  const showIssues = () => issuesBox.replaceChildren(issueList(entryIssues(), 'エントリーに問題はありません。') || '');
+
+  const eventPanel = h('div', { class: 'panel' }, h('h2', {}, '大会'),
+    h('div', { class: 'row' },
+      h('label', { class: 'field' }, '大会名（スタートリストの見出し・CSV のファイル名に使います）',
+        Object.assign(h('input', { placeholder: '例：MMC44', oninput: e => { ev.name = e.target.value; save(); } }), { value: ev.name })),
+      h('label', { class: 'field' }, '実施日',
+        Object.assign(h('input', { type: 'date', oninput: e => { ev.date = e.target.value; save(); } }), { value: ev.date }))));
+
+  const rows = state.entries[k];
+  const grid = makeGrid({
+    rows,
+    cols: [
+      { key: 'bib', label: 'Bib', width: '90px', mono: true, fix: v => fixEntryBib(v, k) },
+      { key: 'name', label: 'Name', fix: v => v.trim() },
+      { key: 'kana', label: 'フリガナ', fix: v => v.trim() },
+    ],
+    newRow: () => ({ bib: '', name: '', kana: '' }),
+    analyze: () => {
+      const cnt = countBy(rows.map(r => norm(r.bib)));
+      return rows.map(r => {
+        const b = norm(r.bib);
+        if (!b) return str(r.name) ? { cls: 'warn', title: 'ビブ未入力' } : null;
+        if (cnt.get(b) > 1) return { cls: 'err', title: 'ビブが重複しています' };
+        if (classOf(b) !== k) return { cls: 'err', title: 'このクラスの番号ではありません' };
+        return null;
+      });
+    },
+    onEdit: () => { save(); showIssues(); },
+    reorder: true,
+  });
+  showIssues();
+
+  return [eventPanel,
+    h('div', { class: 'panel' }, h('h2', {}, 'エントリー'),
+      classTabs('entry', i => entryRows(i).length),
+      h('div', { class: 'row', style: 'margin-bottom:8px' },
+        h('button', { class: 'btn', onclick: () => grid.addRow() }, '行を追加'),
+        h('button', { class: 'btn', onclick: () => pasteEntriesDialog(k) }, 'まとめて貼り付け'),
+        h('button', { class: 'btn', onclick: () => importKanaDialog() }, 'フリガナ表を取り込み'),
+        h('button', { class: 'btn primary', onclick: () => { sortEntries(k); save(); render(); toast(`${CLASSES[k]} をビブ順に並べ替えました。`); } }, 'ビブ順に並べ替え'),
+        h('span', { class: 'sp', style: 'flex:1' }),
+        h('button', { class: 'btn danger', onclick: () => {
+          if (rows.length && confirm(`${CLASSES[k]} のエントリー${entryRows(k).length}人を消します。よろしいですか？`)) {
+            state.entries[k] = []; save(); render();
+          } } }, 'このクラスを空にする')),
+      grid.el,
+      h('p', { class: 'hint' }, 'ビブは1～2桁で入れるとクラス番号が付きます（Sports の 5 → 205）。Enter で下の行へ。Excel の範囲をコピーしてセルに貼り付けると、まとめて入ります。出走順はこの表の並び順です（↑↓で入れ替え）。'),
+      h('div', { class: 'legend' }, h('span', { class: 'err' }, '重複・クラス違い'), h('span', { class: 'warn' }, 'ビブ未入力'))),
+    h('div', { class: 'panel' }, h('h2', {}, '確認事項'), issuesBox)];
+}
+
+function openDialog(title, body, okLabel, onOk) {
+  const dlg = $('#dlg');
+  dlg.replaceChildren(
+    h('div', { class: 'dlg-h' }, title),
+    h('div', { class: 'dlg-b' }, body),
+    h('div', { class: 'dlg-f' },
+      h('button', { class: 'btn', onclick: () => dlg.close() }, 'キャンセル'),
+      h('button', { class: 'btn primary', onclick: () => { if (onOk() !== false) dlg.close(); } }, okLabel)));
+  dlg.showModal();
+  dlg.querySelector('textarea')?.focus();
+}
+
+function splitTsv(text) {
+  return text.replace(/\r\n?/g, '\n').split('\n').map(l => l.split('\t').map(s => s.trim()));
+}
+
+function pasteEntriesDialog(k) {
+  const ta = h('textarea', { placeholder: 'Excel でコピーした範囲を貼り付けてください' });
+  const one = h('input', { type: 'radio', name: 'pm', checked: true });
+  const all = h('input', { type: 'radio', name: 'pm' });
+  const replace = h('input', { type: 'checkbox', checked: true });
+  openDialog('エントリーをまとめて貼り付け', [
+    h('label', {}, one, `${CLASSES[k]} に貼り付け（Bib・Name・フリガナ の2～3列）`),
+    h('label', {}, all, '全クラス一括（Excel の Entry シートの A～L 列、12列）'),
+    ta,
+    h('label', {}, replace, '今のエントリーを置き換える（外すと末尾に追加）'),
+    h('p', { class: 'hint' }, '見出し行（Bib、Name など）は自動で読み飛ばします。'),
+  ], '取り込む', () => {
+    const lines = splitTsv(ta.value);
+    const isHeader = (b, n) => /^bib$/i.test(b) || /^name$/i.test(n) || CLASSES.includes(b);
+    const add = [[], [], [], [], [], []];
+    for (const cells of lines) {
+      if (all.checked) {
+        for (let j = 0; j < 6; j++) {
+          const b = cells[j * 2] ?? '', n = cells[j * 2 + 1] ?? '';
+          if ((b || n) && !isHeader(b, n)) add[j].push({ bib: fixEntryBib(b, j), name: n, kana: '' });
+        }
+      } else {
+        const [b = '', n = '', kana = ''] = cells;
+        if ((b || n) && !isHeader(b, n)) add[k].push({ bib: fixEntryBib(b, k), name: n, kana });
+      }
+    }
+    const total = add.reduce((n, a) => n + a.length, 0);
+    if (!total) { toast('取り込める行がありませんでした。', true); return false; }
+    add.forEach((a, j) => {
+      if (!all.checked && j !== k) return;
+      state.entries[j] = replace.checked ? a : entryRows(j).concat(a);
+    });
+    save(); render();
+    toast(`${total}人を取り込みました。`);
+  });
+}
+
+// エントリーリスト（名前・フリガナの2列）からフリガナを補う
+function importKanaDialog() {
+  const ta = h('textarea', { placeholder: '名前<TAB>フリガナ（Excel の「エントリーリスト」シートの A:B 列をコピー）' });
+  const over = h('input', { type: 'checkbox' });
+  openDialog('フリガナ表を取り込み', [
+    h('p', { class: 'hint', style: 'margin-top:0' }, '名前が一致した選手のフリガナを埋めます（空白の有無は無視）。全クラスが対象です。'),
+    ta,
+    h('label', {}, over, '入力済みのフリガナも上書きする'),
+  ], '取り込む', () => {
+    const dict = new Map();
+    for (const [n, kana] of splitTsv(ta.value)) if (n && kana) dict.set(nameKey(n), kana);
+    if (!dict.size) { toast('名前とフリガナの2列が見つかりませんでした。', true); return false; }
+    let filled = 0;
+    const missing = [];
+    for (const rows of state.entries) for (const r of rows) {
+      if (!str(r.name)) continue;
+      const kana = dict.get(nameKey(r.name));
+      if (kana && (over.checked || !str(r.kana))) { r.kana = kana; filled++; }
+      else if (!kana && !str(r.kana)) missing.push(str(r.name));
+    }
+    save(); render();
+    toast(`${filled}人のフリガナを入れました。` + (missing.length ? `\n表に無い名前：${missing.slice(0, 10).join('、')}${missing.length > 10 ? ` ほか${missing.length - 10}人` : ''}` : ''));
+  });
+}
+
+// ---------- 2・5 スタートリスト ----------
+function viewStartList(second) {
+  const label = second ? '2本目' : '1本目';
+  const { rows, issues } = buildStartList(second);
+  const kana = kanaLookup();
+  const perClass = CLASSES.map((c, k) => `${c} ${rows.filter(r => r.k === k).length}`);
+  const fileName = `${state.event.name}StartList${second ? '2nd' : '1st'}.csv`;
+
+  let lastK = -1;
+  const body = [];
+  rows.forEach((r, i) => {
+    if (r.k !== lastK) { body.push(h('tr', { class: 'sep' }, h('td', { colspan: 4 }, CLASSES[r.k]))); lastK = r.k; }
+    body.push(h('tr', {}, h('td', { class: 'r' }, i + 1), h('td', { class: 't' }, r.bib), h('td', {}, r.name), h('td', {}, kana(r.bib, r.name))));
+  });
+
+  return [
+    h('div', { class: 'panel' }, h('h2', {}, `スタートリスト${label}`),
+      h('p', { class: 'hint', style: 'margin:0 0 10px' }, second
+        ? '出走順は Kids → Junior → Girls → Beginner → Sports → Expert。Expert は1本目リザルトのタイムの遅い順（決勝出走順）、他のクラスはエントリーの並び順です。'
+        : '出走順は Kids → Junior → Girls → Beginner → Sports → Expert。各クラスはエントリーの並び順です。'),
+      h('div', { class: 'chips', style: 'margin-bottom:10px' }, h('span', { class: 'chip' }, `合計 ${rows.length}人`), perClass.map(t => h('span', { class: 'chip' }, t))),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', disabled: !rows.length, onclick: () => {
+          if (downloadSjisCsv(fileName, rows.map(r => [r.bib, r.name]))) toast(`${fileName} を保存しました（${rows.length}人）。`);
+        } }, '計測ソフト用 CSV を保存'),
+        h('button', { class: 'btn', disabled: !rows.length, onclick: () => printStartList(rows, second) }, '印刷'),
+        h('span', { class: 'hint' }, `ファイル名：${fileName}（Shift-JIS、ビブ,名前）`)),
+      issues.length ? h('div', { style: 'margin-top:10px' }, issueList(issues)) : null),
+    h('div', { class: 'panel' },
+      rows.length
+        ? h('table', { class: 'list' }, h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:50px' }, '順'), h('th', { style: 'width:80px' }, 'Bib'), h('th', {}, 'Name'), h('th', {}, 'フリガナ'))), h('tbody', {}, body))
+        : h('p', { class: 'empty' }, second ? 'エントリーと1本目リザルトがまだありません。' : 'エントリーがまだありません。')),
+  ];
+}
+
+// ---------- 3・6 リザルト取り込み ----------
+function viewResult(run) {
+  const key = 'res' + run;
+  const rows = state[key];
+  const issuesBox = h('div');
+  const chips = h('div', { class: 'chips' });
+  const showStatus = () => {
+    const { issues } = analyzeResults(run);
+    issuesBox.replaceChildren(issueList(issues, rows.length ? '問題は見つかりませんでした。' : '') || '');
+    const nUnknown = rows.filter(r => (norm(r.bib) || str(r.name) || str(r.time)) && classOf(r.bib) < 0).length;
+    chips.replaceChildren(h('span', { class: 'chip' }, `${rows.length}行`),
+      CLASSES.map((c, k) => h('span', { class: 'chip' }, `${c} ${resultRows(run, k).length}`)),
+      nUnknown ? h('span', { class: 'chip err' }, `クラス不明 ${nUnknown}`) : null);
+  };
+
+  const grid = makeGrid({
+    rows,
+    cols: [
+      { key: 'bib', label: 'Bib', width: '90px', mono: true, fix: norm },
+      { key: 'name', label: 'Name', fix: v => v.trim() },
+      { key: 'time', label: 'Time', width: '160px', mono: true, fix: norm },
+    ],
+    newRow: () => ({ bib: '', name: '', time: '' }),
+    analyze: () => analyzeResults(run).marks,
+    onEdit: () => { save(); showStatus(); },
+  });
+  showStatus();
+
+  const drop = h('div', { class: 'drop' }, 'リザルト CSV をここにドロップ、または ',
+    h('button', { class: 'btn primary', onclick: () => pickCsv(run) }, 'ファイルを選ぶ'));
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) importResultCsv(e.dataTransfer.files[0], run);
+  });
+
+  const resort = cmp => { state[key] = sortBy(rows, cmp); save(); render(); };
+
+  return [
+    h('div', { class: 'panel' }, h('h2', {}, `${run}本目リザルトの取り込み`),
+      drop,
+      h('p', { class: 'hint' }, '計測ソフトのリザルト CSV（9項目、見出しなし）の2番目（ビブ）、3番目（名前）、5番目（タイム）を取り込みます。読み込み後、同じビブの行（再計測など）を整理してください。クラス分けはビブで自動的に行われ、手順4・7にすぐ反映されます。')),
+    h('div', { class: 'panel' },
+      h('div', { class: 'row', style: 'margin-bottom:8px' }, chips),
+      h('div', { class: 'row', style: 'margin-bottom:8px' },
+        h('button', { class: 'btn', onclick: () => grid.addRow() }, '行を追加'),
+        h('button', { class: 'btn', onclick: () => resort((a, b) => cmpBib(a.bib, b.bib)) }, 'ビブ順'),
+        h('button', { class: 'btn', onclick: () => resort((a, b) => cmpTime(a.time, b.time)) }, 'タイム順'),
+        h('span', { style: 'flex:1' }),
+        h('button', { class: 'btn danger', disabled: !rows.length, onclick: () => {
+          if (confirm(`${run}本目リザルト${rows.length}行をすべて消します。よろしいですか？`)) { state[key] = []; save(); render(); }
+        } }, 'すべて消す')),
+      grid.el,
+      rows.length ? null : h('p', { class: 'empty' }, 'まだ取り込まれていません。'),
+      h('div', { class: 'legend' },
+        h('span', { class: 'err' }, 'クラス不明'), h('span', { class: 'dup' }, 'ビブ重複'),
+        h('span', { class: 'warn' }, 'タイム形式'), h('span', { class: 'info' }, 'エントリーに無い'))),
+    h('div', { class: 'panel' }, h('h2', {}, '確認事項'), issuesBox),
+  ];
+}
+
+function pickCsv(run) {
+  const input = $('#file-csv');
+  input.value = '';
+  input.onchange = () => { if (input.files[0]) importResultCsv(input.files[0], run); };
+  input.click();
+}
+
+async function importResultCsv(file, run) {
+  const text = decodeText(await file.arrayBuffer());
+  const rows = [];
+  let skipped = 0;
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (!line.trim()) continue;
+    const f = parseCsvLine(line);
+    if (f.length >= 5) rows.push({ bib: norm(f[1]), name: f[2], time: norm(f[4]) });
+    else skipped++;
+  }
+  if (!rows.length) { toast(`${file.name} から読み込める行がありませんでした（項目数が5未満）。`, true); return; }
+  const key = 'res' + run;
+  if (state[key].length && !confirm(`${run}本目リザルトの${state[key].length}行を、${file.name} の${rows.length}行で置き換えます。よろしいですか？`)) return;
+  state[key] = rows;
+  save();
+  ui.step = key;
+  render();
+  toast(`${file.name} から${rows.length}件を読み込みました。` + (skipped ? `\n項目数が5未満の行が${skipped}行あったため、読み飛ばしました。` : ''), skipped > 0);
+}
+
+// ---------- 4 1本目クラス別 ----------
+function firstTitle(k) { return k === 0 ? 'Expert 決勝出走順' : `${CLASSES[k]} 1本目`; }
+
+function viewFirst() {
+  const k = ui.cls.first;
+  const list = firstRunList(k);
+  return h('div', { class: 'panel' },
+    h('h2', {}, '1本目 クラス別'),
+    classTabs('first', i => resultRows(1, i).length),
+    h('div', { class: 'row', style: 'margin-bottom:10px' },
+      h('strong', {}, firstTitle(k)),
+      h('span', { class: 'hint', style: 'margin:0' }, k === 0 ? '予選タイムの遅い順（2本目の出走順）' : 'タイムの速い順'),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'btn', disabled: !list.length, onclick: () => printFirst([k]) }, 'このクラスを印刷'),
+      h('button', { class: 'btn', disabled: !state.res1.length, onclick: () => printFirst([0, 1, 2, 3, 4, 5].filter(i => resultRows(1, i).length)) }, '全クラスを印刷')),
+    list.length
+      ? h('table', { class: 'list' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:70px' }, 'NUMBER'), h('th', { style: 'width:80px' }, 'BIB'), h('th', {}, 'NAME'), h('th', {}, 'Time'))),
+          h('tbody', {}, list.map((r, i) => h('tr', {}, h('td', { class: 'r' }, i + 1), h('td', { class: 't' }, norm(r.bib)), h('td', {}, str(r.name)), h('td', { class: 't' }, str(r.time))))))
+      : h('p', { class: 'empty' }, 'このクラスの1本目リザルトはまだありません。'));
+}
+
+// ---------- 7 最終リザルト ----------
+function viewFinal() {
+  const k = ui.cls.final;
+  const { rows, dup1, dup2 } = finalResult(k);
+  const issues = [];
+  if (dup1.length) issues.push(['dup', `1本目でビブが重複しています：${dup1.join('、')}（下の行のタイムを採用しました）`]);
+  if (dup2.length) issues.push(['dup', `2本目でビブが重複しています：${dup2.join('、')}（下の行のタイムを採用しました）`]);
+  const ex = k === 0;
+  return h('div', { class: 'panel' },
+    h('h2', {}, '最終リザルト'),
+    classTabs('final', i => finalResult(i).rows.length),
+    h('div', { class: 'row', style: 'margin-bottom:10px' },
+      h('strong', {}, `CLASS : ${CLASSES[k]}`),
+      h('span', { class: 'hint', style: 'margin:0' }, ex ? '決勝（2本目）タイムで順位' : '2本のうち速い方（BEST TIME）で順位'),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'btn', disabled: !rows.length, onclick: () => printFinal([k]) }, 'このクラスを印刷'),
+      h('button', { class: 'btn', onclick: () => printFinal([0, 1, 2, 3, 4, 5].filter(i => finalResult(i).rows.length)) }, '全クラスを印刷')),
+    issues.length ? h('div', { style: 'margin-bottom:10px' }, issueList(issues)) : null,
+    rows.length
+      ? h('table', { class: 'list' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:60px' }, 'RANK'), h('th', { style: 'width:80px' }, 'BIB'), h('th', {}, 'NAME'),
+            h('th', {}, ex ? '1st. TIME（予選）' : '1st. TIME'), h('th', {}, ex ? 'Final Time' : '2nd. TIME'), !ex && h('th', {}, 'BEST TIME'))),
+          h('tbody', {}, rows.map(o => h('tr', {},
+            h('td', { class: 'r' }, o.rank), h('td', { class: 't' }, o.bib), h('td', {}, o.name),
+            h('td', { class: 't' }, o.t1), h('td', { class: 't' + (ex ? ' best' : '') }, o.t2), !ex && h('td', { class: 't best' }, o.best)))))
+      : h('p', { class: 'empty' }, 'このクラスのリザルトはまだありません。'),
+    h('p', { class: 'hint' }, '同タイムは同順位、タイムの無い選手は順位なしで末尾に並びます。'));
+}
+
+// ---------- 8 Web用 ----------
+function webLines() {
+  const lines = [];
+  CLASSES.forEach((c, k) => {
+    if (lines.length) lines.push([]);
+    lines.push([c]);
+    for (const o of finalResult(k).rows) lines.push([o.rank, o.name, o.key]);
+  });
+  return lines;
+}
+
+function viewWeb() {
+  const lines = webLines();
+  const tsv = lines.map(l => l.join('\t')).join('\r\n');
+  const hasData = state.res1.length || state.res2.length;
+  return h('div', { class: 'panel' },
+    h('h2', {}, 'Web 掲載用データ'),
+    h('p', { class: 'hint', style: 'margin:0 0 10px' }, '全クラスの 順位・名前・タイム（Expert は決勝タイム、他は BEST TIME）。「コピー」で Excel などにそのまま貼り付けられます。'),
+    h('div', { class: 'row', style: 'margin-bottom:10px' },
+      h('button', { class: 'btn primary', disabled: !hasData, onclick: async () => toast(await copyText(tsv) ? 'クリップボードにコピーしました。' : 'コピーできませんでした。', false) }, 'コピー（タブ区切り）'),
+      h('button', { class: 'btn', disabled: !hasData, onclick: () => {
+        const name = `${state.event.name}Web用.csv`;
+        if (downloadSjisCsv(name, lines)) toast(`${name} を保存しました。`);
+      } }, 'CSV を保存')),
+    hasData
+      ? h('table', { class: 'list' }, h('tbody', {}, lines.map(l =>
+          l.length === 1 ? h('tr', { class: 'sep' }, h('td', { colspan: 3 }, l[0]))
+          : l.length ? h('tr', {}, h('td', { class: 'r', style: 'width:60px' }, l[0]), h('td', {}, l[1]), h('td', { class: 't' }, l[2]))
+          : null)))
+      : h('p', { class: 'empty' }, 'リザルトがまだありません。'));
+}
+
+//=====================================================================
+// 印刷（A4 縦。見出しは各ページに繰り返す）
+//=====================================================================
+function printPages(pages) {
+  $('#print-root').replaceChildren(...pages);
+  window.print();
+}
+
+function pageHeader(left, sub, colspan) {
+  return h('tr', { class: 'p-head' }, h('td', { colspan },
+    h('div', { class: 'p-hd' },
+      h('div', { class: 'l' }, left, sub ? h('small', {}, sub) : null),
+      h('div', { class: 'r' }, formatDate(state.event.date), h('br'), 'by UEDA SYSTEM'))));
+}
+
+function printStartList(rows, second) {
+  const kana = kanaLookup();
+  const title = `${state.event.name} スタートリスト${second ? '2本目' : '1本目'}`;
+  const pages = [];
+  for (let p = 0; p < rows.length; p += STARTLIST_PER_PAGE) {
+    const chunk = rows.slice(p, p + STARTLIST_PER_PAGE);
+    const trs = [];
+    for (let i = 0; i < 55; i++) {
+      const cells = [];
+      for (let col = 0; col < 3; col++) {
+        const r = chunk[col * 55 + i];
+        if (col) cells.push(h('td', { class: 'gap' }));
+        cells.push(h('td', { class: 'b' }, r?.bib ?? ''), h('td', {}, r?.name ?? ''), h('td', {}, r ? kana(r.bib, r.name) : ''));
+      }
+      trs.push(h('tr', {}, cells));
+    }
+    const colgroup = h('colgroup', {}, [0, 1, 2].map(col => [col ? h('col', { style: 'width:1.5mm' }) : null,
+      h('col', { style: 'width:9mm' }), h('col', { style: 'width:25mm' }), h('col', { style: 'width:30mm' })]));
+    pages.push(h('div', { class: 'page' }, h('div', { class: 'p-sl-title' }, title), h('table', { class: 'p-sl' }, colgroup, h('tbody', {}, trs))));
+  }
+  printPages(pages);
+}
+
+function printFirst(classIdx) {
+  printPages(classIdx.map(k => {
+    const list = firstRunList(k);
+    return h('div', { class: 'page' }, h('table', { class: 'p-table' },
+      h('thead', {}, pageHeader(firstTitle(k), state.event.name, 4),
+        h('tr', {}, h('th', { style: 'width:20mm' }, 'NUMBER'), h('th', { style: 'width:20mm' }, 'BIB'), h('th', {}, 'NAME'), h('th', { style: 'width:36mm' }, 'Time'))),
+      h('tbody', {}, list.map((r, i) => h('tr', {}, h('td', { class: 'c' }, i + 1), h('td', { class: 'c' }, norm(r.bib)), h('td', {}, str(r.name)), h('td', { class: 'c t' }, str(r.time)))))));
+  }));
+}
+
+function printFinal(classIdx) {
+  printPages(classIdx.map(k => {
+    const ex = k === 0;
+    const { rows } = finalResult(k);
+    const ncol = ex ? 5 : 6;
+    return h('div', { class: 'page' }, h('table', { class: 'p-table' },
+      h('thead', {}, pageHeader(`CLASS : ${CLASSES[k]}`, state.event.name, ncol),
+        h('tr', {}, h('th', { style: 'width:15mm' }, 'RANK'), h('th', { style: 'width:15mm' }, 'BIB'), h('th', {}, 'NAME'),
+          h('th', { style: 'width:30mm' }, '1st. TIME'), h('th', { style: 'width:30mm' }, ex ? 'Final Time' : '2nd. TIME'),
+          !ex && h('th', { style: 'width:30mm' }, 'BEST TIME'))),
+      h('tbody', {}, rows.map(o => h('tr', {},
+        h('td', { class: 'c' }, o.rank), h('td', { class: 'c' }, o.bib), h('td', {}, o.name),
+        h('td', { class: 'c t' }, o.t1), h('td', { class: 'c t' }, o.t2), !ex && h('td', { class: 'c t' }, o.best))))));
+  }));
+}
+
+//=====================================================================
+// 上部のボタン
+//=====================================================================
+$('#btn-save').onclick = () => {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-` +
+                `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  download(`${state.event.name || 'MMC'}_data_${stamp}.json`, JSON.stringify(state, null, 1), 'application/json');
+};
+
+$('#btn-load').onclick = () => {
+  const input = $('#file-json');
+  input.value = '';
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    let s = null;
+    try { s = sanitizeState(JSON.parse(decodeText(await file.arrayBuffer()))); } catch (e) { s = null; }
+    if (!s) { toast(`${file.name} は大会データのファイルではありません。`, true); return; }
+    if (!confirm(`${file.name} を読み込みます。今のデータは置き換わります。よろしいですか？`)) return;
+    state = s;
+    save();
+    render();
+    toast('読み込みました。');
+  };
+  input.click();
+};
+
+// clearAllData：エントリー以外を消す
+$('#btn-clear').onclick = () => {
+  if (!confirm('1本目・2本目のリザルトをすべて消します（エントリーと大会情報は残ります）。よろしいですか？')) return;
+  state.res1 = [];
+  state.res2 = [];
+  save();
+  render();
+  toast('クリアしました。（エントリーはそのままです）');
+};
+
+$('#btn-reset').onclick = () => {
+  if (!confirm('エントリーも含めて、すべてのデータを消します。必要なら先に「データを保存」してください。\nよろしいですか？')) return;
+  state = emptyState();
+  save();
+  ui.step = 'entry';
+  render();
+};
+
+// 別のタブで変更されたら読み直す
+window.addEventListener('storage', e => {
+  if (e.key !== STORE_KEY) return;
+  const s = loadState();
+  if (s) { state = s; render(); toast('別のタブでの変更を読み込みました。'); }
+});
+
+render();
+</script>
+</body>
+</html>
