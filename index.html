@@ -219,7 +219,7 @@ const FIREBASE = {
   eventId: 'mmc',      // 大会ごとに変えると前の大会の分が残る。閲覧用 URL の #view/<ここ>
 };
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
-const VIEW_STEPS = ['start1', 'first', 'start2', 'final'];   // 閲覧モードで見せる画面
+const VIEW_STEPS = ['first', 'final'];                       // 閲覧モードで見せる画面（公開するのはリザルトだけ）
 const viewHash = /^#view\/([A-Za-z0-9_-]+)$/.exec(location.hash);
 const VIEW = !!viewHash;                                     // 閲覧モード（読むだけ。保存も公開もしない）
 const EVENT_ID = viewHash ? viewHash[1] : FIREBASE.eventId;
@@ -232,7 +232,7 @@ const STEPS = [
   ['first',  '5 1本目クラス別'],
   ['start2', '6 スタートリスト2本目'],
   ['res2',   '7 2本目リザルト'],
-  ['final',  '8 最終リザルト'],
+  ['final',  '8 リザルト'],
   ['web',    '9 Web用'],
 ];
 
@@ -321,12 +321,14 @@ function sanitizeRows(rows, fields) {
 }
 
 function sanitizeState(s) {
-  if (!s || typeof s !== 'object' || !Array.isArray(s.entries) || !s.entries.length) return null;
+  if (!s || typeof s !== 'object') return null;
+  // 公開データはリザルトだけ（エントリーを含まない）。どれか1つでも配列があれば読む。
+  if (!Array.isArray(s.entries) && !Array.isArray(s.res1) && !Array.isArray(s.res2)) return null;
   // OldTimer を足す前（6クラス）の保存データも読めるように、足りないクラスは空で補う
   return {
     version: 1,
     event: { name: String(s.event?.name ?? ''), date: String(s.event?.date ?? '') },
-    entries: CLASSES.map((_, k) => sanitizeRows(s.entries[k], ['bib', 'name', 'kana'])),
+    entries: CLASSES.map((_, k) => sanitizeRows(s.entries?.[k], ['bib', 'name', 'kana'])),
     res1: sanitizeRows(s.res1, ['bib', 'name', 'time']),
     res2: sanitizeRows(s.res2, ['bib', 'name', 'time']),
   };
@@ -1266,7 +1268,7 @@ function viewFirst() {
       : h('p', { class: 'empty' }, 'このクラスの1本目リザルトはまだありません。'));
 }
 
-// ---------- 8 最終リザルト ----------
+// ---------- 8 リザルト ----------
 function viewFinal() {
   const k = ui.cls.final;
   const { rows, dup1, dup2 } = finalResult(k);
@@ -1275,7 +1277,7 @@ function viewFinal() {
   if (dup2.length) issues.push(['dup', `2本目でビブが重複しています：${dup2.join('、')}（下の行のタイムを採用しました）`]);
   const ex = k === 0;
   return h('div', { class: 'panel' },
-    h('h2', {}, '最終リザルト'),
+    h('h2', {}, 'リザルト'),
     classTabs('final', i => finalResult(i).rows.length),
     h('div', { class: 'row', style: 'margin-bottom:10px' },
       h('strong', {}, `CLASS : ${CLASSES[k]}`),
@@ -1462,17 +1464,17 @@ async function firebase() {
   return fb;
 }
 
-// 公開する内容。フリガナと、名前もビブも空の行は落とす。
+// 公開する内容はリザルトだけ。エントリー（＝スタートリストの元）とフリガナは
+// 送らない。名前もビブもタイムも空の行は落とす。
 function publicState() {
-  const pick = (rows, fields) => rows
-    .filter(r => fields.some(f => str(r[f])))
-    .map(r => Object.fromEntries(fields.map(f => [f, String(r[f] ?? '')])));
+  const pick = rows => rows
+    .filter(r => str(r.bib) || str(r.name) || str(r.time))
+    .map(r => ({ bib: String(r.bib ?? ''), name: String(r.name ?? ''), time: String(r.time ?? '') }));
   return {
     version: 1,
     event: { name: str(state.event.name), date: str(state.event.date) },
-    entries: state.entries.map(rows => pick(rows, ['bib', 'name'])),
-    res1: pick(state.res1, ['bib', 'name', 'time']),
-    res2: pick(state.res2, ['bib', 'name', 'time']),
+    res1: pick(state.res1),
+    res2: pick(state.res2),
   };
 }
 
@@ -1495,7 +1497,8 @@ async function publish() {
       json: JSON.stringify(data),
       at: fs.serverTimestamp(),
       event: data.event.name,
-      entries: data.entries.reduce((n, rows) => n + rows.length, 0),
+      res1: data.res1.length,
+      res2: data.res2.length,
     });
     setPub('公開 ' + hhmm(new Date()));
     toast('公開しました。閲覧用 URL：' + viewUrl());
@@ -1523,7 +1526,7 @@ function subscribe() {
       try { s = sanitizeState(JSON.parse(d.json)); } catch (e) { s = null; }
       if (!s) { setPub('データを読めませんでした'); return; }
       state = s;
-      // 最初に受け取ったとき、リザルトが出ていれば最終リザルトを開く
+      // 最初に受け取ったとき、リザルトが出ていればリザルト画面を開く
       if (first && (state.res1.length || state.res2.length)) ui.step = 'final';
       first = false;
       const at = d.at && d.at.toDate ? d.at.toDate() : null;
