@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 集計規則を意図的に変えた点は2つだけ。同タイムを同順位にしたことと、タイムの無い選手を順位なしにしたこと。
 - Shift-JIS の CSV 書き出しは、`TextDecoder('shift_jis')` から作った逆引き表で行っている。元リポジトリの `sample/` 4ファイルでバイト単位の往復一致を確認済み。
 - エントリーにフリガナ列がある。ブックの `エントリーリスト` シートの A:B を貼り付けると、名前で照合して埋まる。
-- 印刷用スタートリストは55人×3列で1ページ(`STARTLIST_PER_PAGE = 165`)。**`.p-sl` には `line-height` を必ず書く。** `body` の `font:14px/1.5` を継承すると 8.5pt × 1.5 = 4.5mm の行箱が `height` より高くなって行が伸び、52行で改ページされる(1列目が2ページに分かれる)。A4 縦・上下余白19mm では1ページ58行ぶんしか高さが無い。
+- 印刷用スタートリストは55行×3列で1ページ(`STARTLIST_ROWS` × `STARTLIST_COLS`)。**人数ではなく行数**で数える。クラスの区切りが1行使うため、`startListCells()` が区切りを挟んだ行の並びを作ってから流し込む。区切りが列の最後に来ると見出しだけ取り残されるので、空行を1つ入れてそのクラスごと次の列に送っている。**`.p-sl` には `line-height` を必ず書く。** `body` の `font:14px/1.5` を継承すると 8.5pt × 1.5 = 4.5mm の行箱が `height` より高くなって行が伸び、52行で改ページされる(1列目が2ページに分かれる)。A4 縦・上下余白19mm では1ページ58行ぶんしか高さが無い。
 - テストは無い。確認するときはヘッドレス Chrome で、iframe 越しに関数を呼ぶ使い捨てページを作る。**実名データを含むのでコミットしない**(`.gitignore` が `*.csv` と `*.json` を除外している)。
   - 起動例: `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox --allow-file-access-from-files --virtual-time-budget=10000 --dump-dom "file://<テストページ>"`。`--allow-file-access-from-files` が無いと iframe に触れない。
   - `const`/`let` で宣言した `state` や `ui` は `window` に載らないので、`contentWindow.eval('ui')` 経由で触る。`function` 宣言(`parseRoster` など)は `contentWindow.<名前>` で直接呼べる。
