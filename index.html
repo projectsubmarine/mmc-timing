@@ -31,6 +31,8 @@ button{cursor:pointer}
 .topbar button{background:#323b4d;border:1px solid #485267;color:#fff;border-radius:6px;padding:5px 10px;font-size:13px}
 .topbar button:hover{background:#3d475c}
 .topbar button.danger{border-color:#7d3a3a}
+.topbar .pub{color:#b8c1d4;font-size:12px}
+.app.view .edit-only{display:none}
 .steps{display:flex;gap:4px;overflow-x:auto;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
 .steps button{flex:none;border:1px solid transparent;background:none;border-radius:6px;padding:6px 10px;color:var(--muted);white-space:nowrap}
 .steps button:hover{background:var(--bg)}
@@ -168,10 +170,13 @@ dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
     <h1>MMC タイム集計</h1>
     <span class="ev" id="ev-label"></span>
     <span class="sp"></span>
-    <button id="btn-save" title="大会データ一式を JSON ファイルに保存します">データを保存</button>
-    <button id="btn-load" title="保存した JSON ファイルを読み込みます">データを読み込み</button>
-    <button id="btn-clear" class="danger" title="エントリー以外を消します">リザルトをクリア</button>
-    <button id="btn-reset" class="danger" title="エントリーも含めてすべて消します">すべて消去</button>
+    <span class="pub" id="pub-label"></span>
+    <button id="btn-publish" class="edit-only" title="今のスタートリストとリザルトを、閲覧用の画面に公開します">公開</button>
+    <button id="btn-viewurl" class="edit-only" title="閲覧用 URL をクリップボードにコピーします">閲覧用 URL</button>
+    <button id="btn-save" class="edit-only" title="大会データ一式を JSON ファイルに保存します">データを保存</button>
+    <button id="btn-load" class="edit-only" title="保存した JSON ファイルを読み込みます">データを読み込み</button>
+    <button id="btn-clear" class="danger edit-only" title="エントリー以外を消します">リザルトをクリア</button>
+    <button id="btn-reset" class="danger edit-only" title="エントリーも含めてすべて消します">すべて消去</button>
   </header>
   <nav class="steps" id="steps"></nav>
   <main id="view"></main>
@@ -199,6 +204,18 @@ const STORE_KEY = 'mmc-timing-v1';
 const TIME_RE = /^\d{2}:\d{2}\.\d{2,3}$/;      // Kids は小数2桁
 const STARTLIST_PER_PAGE = 165;                 // 印刷用：55人×3列
 
+// 公開と閲覧（Firestore）。仕組みは下の「公開（Firestore）」の節を見ること。
+// ↓↓↓ Firebase コンソールで作ったプロジェクトの値をここに貼る ↓↓↓
+const FIREBASE = {
+  config: null,        // 例：{ apiKey: '…', authDomain: '…', projectId: '…', appId: '…' }
+  eventId: 'mmc',      // 大会ごとに変えると前の大会の分が残る。閲覧用 URL の #view/<ここ>
+};
+const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+const VIEW_STEPS = ['start1', 'first', 'start2', 'final'];   // 閲覧モードで見せる画面
+const viewHash = /^#view\/([A-Za-z0-9_-]+)$/.exec(location.hash);
+const VIEW = !!viewHash;                                     // 閲覧モード（読むだけ。保存も公開もしない）
+const EVENT_ID = viewHash ? viewHash[1] : FIREBASE.eventId;
+
 const STEPS = [
   ['import', '1 名簿取込'],
   ['entry',  '2 エントリー'],
@@ -215,9 +232,10 @@ function emptyState() {
   return { version: 1, event: { name: '', date: '' }, entries: CLASSES.map(() => []), res1: [], res2: [] };
 }
 
-let state = loadState() || emptyState();
+// 閲覧モードでは、この端末に保存されている編集中のデータは読まない（公開された分だけを表示する）
+let state = (VIEW ? null : loadState()) || emptyState();
 const ui = {
-  step: 'entry',
+  step: VIEW ? 'start1' : 'entry',
   cls: { entry: 0, first: 0, final: 0 },
   imp: { text: '', groups: null, map: [], replace: true },   // 名簿取込（保存はしない）
 };
@@ -312,6 +330,7 @@ function loadState() {
 
 let saveFailed = false;
 function save() {
+  if (VIEW) { updateChrome(); return; }   // 閲覧モードは端末のデータに触らない
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
     saveFailed = false;
@@ -731,12 +750,14 @@ function classTabs(key, count) {
 function updateChrome() {
   const ev = state.event;
   $('#ev-label').textContent = [ev.name, formatDate(ev.date)].filter(Boolean).join('　');
-  const badge = {
+  $('#pub-label').textContent = pubText;
+  const badge = VIEW ? {} : {
     entry: state.entries.reduce((n, _, k) => n + entryRows(k).length, 0),
     res1: state.res1.length,
     res2: state.res2.length,
   };
-  $('#steps').replaceChildren(...STEPS.map(([id, label]) =>
+  const steps = VIEW ? STEPS.filter(([id]) => VIEW_STEPS.includes(id)) : STEPS;
+  $('#steps').replaceChildren(...steps.map(([id, label]) =>
     h('button', { class: ui.step === id ? 'on' : null, onclick: () => { ui.step = id; render(); window.scrollTo(0, 0); } },
       label, badge[id] ? h('span', { class: 'badge' }, badge[id]) : null)));
 }
@@ -1058,8 +1079,9 @@ function viewStartList(second) {
   let lastK = -1;
   const body = [];
   rows.forEach((r, i) => {
-    if (r.k !== lastK) { body.push(h('tr', { class: 'sep' }, h('td', { colspan: 4 }, CLASSES[r.k]))); lastK = r.k; }
-    body.push(h('tr', {}, h('td', { class: 'r' }, i + 1), h('td', { class: 't' }, r.bib), h('td', {}, r.name), h('td', {}, kana(r.bib, r.name))));
+    if (r.k !== lastK) { body.push(h('tr', { class: 'sep' }, h('td', { colspan: VIEW ? 3 : 4 }, CLASSES[r.k]))); lastK = r.k; }
+    body.push(h('tr', {}, h('td', { class: 'r' }, i + 1), h('td', { class: 't' }, r.bib), h('td', {}, r.name),
+      !VIEW && h('td', {}, kana(r.bib, r.name))));
   });
 
   return [
@@ -1068,7 +1090,7 @@ function viewStartList(second) {
         ? `出走順は ${RUN_ORDER.map(i => CLASSES[i]).join(' → ')}。Expert は1本目リザルトのタイムの遅い順（決勝出走順）、他のクラスはエントリーの並び順です。`
         : `出走順は ${RUN_ORDER.map(i => CLASSES[i]).join(' → ')}。各クラスはエントリーの並び順です。`),
       h('div', { class: 'chips', style: 'margin-bottom:10px' }, h('span', { class: 'chip' }, `合計 ${rows.length}人`), perClass.map(t => h('span', { class: 'chip' }, t))),
-      h('div', { class: 'row' },
+      !VIEW && h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: !rows.length, onclick: () => {
           if (downloadSjisCsv(fileName, rows.map(r => [r.bib, r.name]))) toast(`${fileName} を保存しました（${rows.length}人）。`);
         } }, '計測ソフト用 CSV を保存'),
@@ -1077,7 +1099,7 @@ function viewStartList(second) {
       issues.length ? h('div', { style: 'margin-top:10px' }, issueList(issues)) : null),
     h('div', { class: 'panel' },
       rows.length
-        ? h('table', { class: 'list' }, h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:50px' }, '順'), h('th', { style: 'width:80px' }, 'Bib'), h('th', {}, 'Name'), h('th', {}, 'フリガナ'))), h('tbody', {}, body))
+        ? h('table', { class: 'list' }, h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:50px' }, '順'), h('th', { style: 'width:80px' }, 'Bib'), h('th', {}, 'Name'), !VIEW && h('th', {}, 'フリガナ'))), h('tbody', {}, body))
         : h('p', { class: 'empty' }, second ? 'エントリーと1本目リザルトがまだありません。' : 'エントリーがまだありません。')),
   ];
 }
@@ -1188,8 +1210,8 @@ function viewFirst() {
       h('strong', {}, firstTitle(k)),
       h('span', { class: 'hint', style: 'margin:0' }, k === 0 ? '予選タイムの遅い順（2本目の出走順）' : 'タイムの速い順'),
       h('span', { style: 'flex:1' }),
-      h('button', { class: 'btn', disabled: !list.length, onclick: () => printFirst([k]) }, 'このクラスを印刷'),
-      h('button', { class: 'btn', disabled: !state.res1.length, onclick: () => printFirst(CLASSES.map((_, i) => i).filter(i => resultRows(1, i).length)) }, '全クラスを印刷')),
+      !VIEW && h('button', { class: 'btn', disabled: !list.length, onclick: () => printFirst([k]) }, 'このクラスを印刷'),
+      !VIEW && h('button', { class: 'btn', disabled: !state.res1.length, onclick: () => printFirst(CLASSES.map((_, i) => i).filter(i => resultRows(1, i).length)) }, '全クラスを印刷')),
     list.length
       ? h('table', { class: 'list' },
           h('thead', {}, h('tr', {}, h('th', { class: 'r', style: 'width:70px' }, 'NUMBER'), h('th', { style: 'width:80px' }, 'BIB'), h('th', {}, 'NAME'), h('th', {}, 'Time'))),
@@ -1212,8 +1234,8 @@ function viewFinal() {
       h('strong', {}, `CLASS : ${CLASSES[k]}`),
       h('span', { class: 'hint', style: 'margin:0' }, ex ? '決勝（2本目）タイムで順位' : '2本のうち速い方（BEST TIME）で順位'),
       h('span', { style: 'flex:1' }),
-      h('button', { class: 'btn', disabled: !rows.length, onclick: () => printFinal([k]) }, 'このクラスを印刷'),
-      h('button', { class: 'btn', onclick: () => printFinal(CLASSES.map((_, i) => i).filter(i => finalResult(i).rows.length)) }, '全クラスを印刷')),
+      !VIEW && h('button', { class: 'btn', disabled: !rows.length, onclick: () => printFinal([k]) }, 'このクラスを印刷'),
+      !VIEW && h('button', { class: 'btn', onclick: () => printFinal(CLASSES.map((_, i) => i).filter(i => finalResult(i).rows.length)) }, '全クラスを印刷')),
     issues.length ? h('div', { style: 'margin-bottom:10px' }, issueList(issues)) : null,
     rows.length
       ? h('table', { class: 'list' },
@@ -1323,8 +1345,144 @@ function printFinal(classIdx) {
 }
 
 //=====================================================================
+// 公開（Firestore）
+//   編集するのは1人だけ、他のメンバーはスタートリストとリザルトを見るだけ、
+//   という使い方のための仕組み。「公開」を押したときだけ、そのときの内容を
+//   ドキュメント1件に上書きし、#view/<大会ID> で開いた画面がそれを購読する。
+//   ・自動保存ではなく押したときだけにしてある。リザルト取込は重複ビブを手で
+//     直す前提なので、常時同期だと直しかけの順位が見えてしまう。
+//   ・state をそのままの形では置けない。Firestore は配列の入れ子を持てず、
+//     entries がクラス別の配列の配列になっているため、JSON 文字列1個で持つ。
+//   ・公開するのは掲示・Web 掲載するものだけ。フリガナは送らない。
+//   ・設定していない（FIREBASE.config が null）間は、公開まわりは動かないだけで
+//     今までどおり使える。
+//
+//   Firebase 側の設定：
+//     Firestore のルールは events/<大会ID> を「読みは全員、書きは自分だけ」に。
+//       match /databases/{db}/documents/events/{id} {
+//         allow read: if true;
+//         allow write: if request.auth != null && request.auth.token.email == '<自分のアドレス>';
+//       }
+//     Authentication で Google ログインを有効にし、承認済みドメインに
+//     projectsubmarine.github.io を入れておく。
+//=====================================================================
+let pubText = '';
+let fb = null;
+
+function setPub(text) {
+  pubText = text;
+  $('#pub-label').textContent = text;
+}
+
+const viewUrl = () => location.href.replace(/#.*$/, '') + '#view/' + FIREBASE.eventId;
+
+const hhmm = d => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
+
+// Firebase の読み込みは使うときまで遅らせる（設定していなければ一度も読み込まない）
+async function firebase() {
+  if (fb) return fb;
+  if (!FIREBASE.config) throw new Error('未設定');
+  const [app, fs] = await Promise.all([
+    import(FIREBASE_SDK + 'firebase-app.js'),
+    import(FIREBASE_SDK + 'firebase-firestore.js'),
+  ]);
+  const a = app.initializeApp(FIREBASE.config);
+  // 閲覧側だけ端末に残す。電波が切れても、最後に受け取った内容を表示できる。
+  // 編集側は残さない（送信が保留のまま「公開しました」と出ると困るため）。
+  const db = VIEW
+    ? fs.initializeFirestore(a, { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) })
+    : fs.getFirestore(a);
+  fb = { app: a, fs, db, ref: fs.doc(db, 'events', EVENT_ID) };
+  return fb;
+}
+
+// 公開する内容。フリガナと、名前もビブも空の行は落とす。
+function publicState() {
+  const pick = (rows, fields) => rows
+    .filter(r => fields.some(f => str(r[f])))
+    .map(r => Object.fromEntries(fields.map(f => [f, String(r[f] ?? '')])));
+  return {
+    version: 1,
+    event: { name: str(state.event.name), date: str(state.event.date) },
+    entries: state.entries.map(rows => pick(rows, ['bib', 'name'])),
+    res1: pick(state.res1, ['bib', 'name', 'time']),
+    res2: pick(state.res2, ['bib', 'name', 'time']),
+  };
+}
+
+async function publish() {
+  if (!FIREBASE.config) {
+    toast('公開の設定がまだです。index.html の FIREBASE に Firebase の設定値を入れてください。', true);
+    return;
+  }
+  const btn = $('#btn-publish');
+  btn.disabled = true;
+  setPub('公開中…');
+  try {
+    const { fs, app, ref } = await firebase();
+    const auth = await import(FIREBASE_SDK + 'firebase-auth.js');
+    const a = auth.getAuth(app);
+    // 書き込めるのは自分だけ。ログインは初回だけで、以後はこのブラウザに残る。
+    if (!a.currentUser) await auth.signInWithPopup(a, new auth.GoogleAuthProvider());
+    const data = publicState();
+    await fs.setDoc(ref, {
+      json: JSON.stringify(data),
+      at: fs.serverTimestamp(),
+      event: data.event.name,
+      entries: data.entries.reduce((n, rows) => n + rows.length, 0),
+    });
+    setPub('公開 ' + hhmm(new Date()));
+    toast('公開しました。閲覧用 URL：' + viewUrl());
+  } catch (e) {
+    setPub('公開できていません');
+    const why = e && e.code === 'permission-denied' ? 'このアカウントには書き込みが許可されていません。'
+      : e && e.code === 'auth/popup-closed-by-user' ? 'ログインが中断されました。'
+      : (e && (e.message || e.code)) || '原因不明';
+    toast('公開できませんでした。\n' + why, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 閲覧モード：公開された内容を購読して表示するだけ
+function subscribe() {
+  if (!FIREBASE.config) { setPub('公開の設定がまだです'); return; }
+  setPub('読み込み中…');
+  let first = true;
+  firebase().then(({ fs, ref }) => {
+    fs.onSnapshot(ref, snap => {
+      if (!snap.exists()) { setPub('まだ公開されていません'); return; }
+      const d = snap.data();
+      let s = null;
+      try { s = sanitizeState(JSON.parse(d.json)); } catch (e) { s = null; }
+      if (!s) { setPub('データを読めませんでした'); return; }
+      state = s;
+      // 最初に受け取ったとき、リザルトが出ていれば最終リザルトを開く
+      if (first && (state.res1.length || state.res2.length)) ui.step = 'final';
+      first = false;
+      const at = d.at && d.at.toDate ? d.at.toDate() : null;
+      setPub((snap.metadata.fromCache ? '通信なし（最後に受信した分）　' : '') + (at ? '更新 ' + hhmm(at) : '更新 ―'));
+      render();
+    }, err => {
+      setPub('つながりません');
+      toast('公開データを読み込めませんでした。\n' + (err.message || err.code), true);
+    });
+  }).catch(e => {
+    setPub('つながりません');
+    toast('公開データを読み込めませんでした。\n' + (e.message || e), true);
+  });
+}
+
+//=====================================================================
 // 上部のボタン
 //=====================================================================
+$('#btn-publish').onclick = publish;
+
+$('#btn-viewurl').onclick = async () => {
+  const url = viewUrl();
+  toast(await copyText(url) ? '閲覧用 URL をコピーしました。\n' + url : url);
+};
+
 $('#btn-save').onclick = () => {
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-` +
@@ -1368,12 +1526,18 @@ $('#btn-reset').onclick = () => {
   render();
 };
 
-// 別のタブで変更されたら読み直す
-window.addEventListener('storage', e => {
+// 別のタブで変更されたら読み直す（閲覧モードは公開された分だけを見る）
+if (!VIEW) window.addEventListener('storage', e => {
   if (e.key !== STORE_KEY) return;
   const s = loadState();
   if (s) { state = s; render(); toast('別のタブでの変更を読み込みました。'); }
 });
+
+if (VIEW) {
+  document.title = 'MMC リザルト';
+  $('.app').classList.add('view');
+  subscribe();
+}
 
 render();
 </script>
