@@ -160,6 +160,7 @@ dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
 .p-sl td{border:0.5pt solid #000;height:4.2mm;padding:0 1mm;white-space:nowrap;overflow:hidden}
 .p-sl td.b{text-align:center}
 .p-sl td.gap{border:0;width:1.5mm}
+.p-sl td.sep{background:#ddd;font-weight:bold;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 </style>
 </head>
 <body>
@@ -197,7 +198,9 @@ const CLASS_BIB = [1, 2, 3, 4, 5, 6, 9];       // 添字 → ビブの百の位
 const RUN_ORDER = [5, 4, 3, 2, 1, 0, 6];       // 出走順：Kids → … → Expert → OldTimer
 const STORE_KEY = 'mmc-timing-v1';
 const TIME_RE = /^\d{2}:\d{2}\.\d{2,3}$/;      // Kids は小数2桁
-const STARTLIST_PER_PAGE = 165;                 // 印刷用：55人×3列
+const STARTLIST_ROWS = 55;                      // 印刷用：1列の行数
+const STARTLIST_COLS = 3;                       // 印刷用：1ページの列数
+const STARTLIST_PER_PAGE = STARTLIST_ROWS * STARTLIST_COLS;   // 1ページの行数（クラスの区切りも1行と数える）
 
 const STEPS = [
   ['import', '1 名簿取込'],
@@ -1312,19 +1315,38 @@ function pageHeader(left, sub, colspan) {
       h('div', { class: 'r' }, formatDate(state.event.date), h('br'), 'by UEDA SYSTEM'))));
 }
 
+// 出走リストを、クラスの区切りを挟んだ印刷用の行の並びに直す。
+//   区切りは1行ぶん使う。列の最後の行に来ると見出しだけが取り残されるので、
+//   そのときは空行を1つ入れてクラスごと次の列の先頭から始める。
+function startListCells(rows) {
+  const cells = [];
+  let lastK = -1;
+  for (const r of rows) {
+    if (r.k !== lastK) {
+      if (cells.length % STARTLIST_ROWS === STARTLIST_ROWS - 1) cells.push(null);
+      cells.push({ sep: CLASSES[r.k] });
+      lastK = r.k;
+    }
+    cells.push(r);
+  }
+  return cells;
+}
+
 function printStartList(rows, second) {
   const kana = kanaLookup();
   const title = `${state.event.name} スタートリスト${second ? '2本目' : '1本目'}`;
+  const all = startListCells(rows);
   const pages = [];
-  for (let p = 0; p < rows.length; p += STARTLIST_PER_PAGE) {
-    const chunk = rows.slice(p, p + STARTLIST_PER_PAGE);
+  for (let p = 0; p < all.length; p += STARTLIST_PER_PAGE) {
+    const chunk = all.slice(p, p + STARTLIST_PER_PAGE);
     const trs = [];
-    for (let i = 0; i < 55; i++) {
+    for (let i = 0; i < STARTLIST_ROWS; i++) {
       const cells = [];
-      for (let col = 0; col < 3; col++) {
-        const r = chunk[col * 55 + i];
+      for (let col = 0; col < STARTLIST_COLS; col++) {
+        const r = chunk[col * STARTLIST_ROWS + i];
         if (col) cells.push(h('td', { class: 'gap' }));
-        cells.push(h('td', { class: 'b' }, r?.bib ?? ''), h('td', {}, r?.name ?? ''), h('td', {}, r ? kana(r.bib, r.name) : ''));
+        if (r && r.sep) cells.push(h('td', { class: 'sep', colspan: 3 }, r.sep));
+        else cells.push(h('td', { class: 'b' }, r?.bib ?? ''), h('td', {}, r?.name ?? ''), h('td', {}, r ? kana(r.bib, r.name) : ''));
       }
       trs.push(h('tr', {}, cells));
     }
