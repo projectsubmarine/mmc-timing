@@ -28,6 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `#view/<大会ID>` で開くと閲覧モード(`VIEW`)。localStorage を読まず書かず、`VIEW_STEPS` の4画面だけ、書き出し・印刷ボタンとフリガナ列は出さない。`.app` に `view` が付き、`.edit-only` が消える。
   - 公開するのは掲示・Web 掲載するものだけ。**フリガナは送らない**(`publicState()` で落とす)。
   - SDK は gstatic から動的 `import()`。閲覧側だけ `persistentLocalCache` で端末に残す(電波が切れても最後の表が見られる)。編集側は残さない(送信が保留のまま「公開しました」と出ると困る)。
+- リザルト取込画面の「エントリーから追加」は、`missingRiders(run, k)`(その run にまだ行が無い出走者)を表に足すだけ。手集計の Kids と CSV の取りこぼし用。出走者は `buildStartList(run === 2)` から取るので、2本目の Expert が予選通過者だけになる規則に自動で従う。判定は**タイムの有無ではなく行の有無**なので、押しても重複しない。
 - **Excel 版との違い**: クラス別・最終リザルトはリザルト表から毎回計算する(「送信」「リザルト作成」に当たるボタンは無い)。手修正はリザルト取込画面の表で行う。
 - 集計規則を意図的に変えた点は2つだけ。同タイムを同順位にしたことと、タイムの無い選手を順位なしにしたこと。
 - Shift-JIS の CSV 書き出しは、`TextDecoder('shift_jis')` から作った逆引き表で行っている。元リポジトリの `sample/` 4ファイルでバイト単位の往復一致を確認済み。
