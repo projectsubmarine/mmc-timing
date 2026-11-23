@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 取込画面の作業状態は `ui.imp` に持つ。保存はしないので、リロードすると消える(意図的)。
 - **`h()` と `replaceChildren` を混同しないこと。** 自作の `h()` は子要素の配列を平坦化し `null`/`false` を読み飛ばすが、DOM 標準の `replaceChildren`・`append` はしない。配列や `null` をそのまま渡すと `[object HTMLSpanElement]` や `null` が**画面に文字として出る**(実際にリザルト取り込み画面のチップで起きた)。`replaceChildren` に渡すときは `...arr` と展開し、条件付きの要素は `...(cond ? [el] : [])` にする。
 - 入力内容は localStorage(`mmc-timing-v1`)に自動保存。「データを保存/読み込み」で JSON ファイルにも書き出せる。通信は一切行わない。
+- リザルト取込画面の「エントリーから追加」は、`missingRiders(run, k)`(その run にまだ行が無い出走者)を表に足すだけ。手集計の Kids と CSV の取りこぼし用。出走者は `buildStartList(run === 2)` から取るので、2本目の Expert が予選通過者だけになる規則に自動で従う。判定は**タイムの有無ではなく行の有無**なので、押しても重複しない。
 - **Excel 版との違い**: クラス別・最終リザルトはリザルト表から毎回計算する(「送信」「リザルト作成」に当たるボタンは無い)。手修正はリザルト取込画面の表で行う。
 - 集計規則を意図的に変えた点は2つだけ。同タイムを同順位にしたことと、タイムの無い選手を順位なしにしたこと。
 - Shift-JIS の CSV 書き出しは、`TextDecoder('shift_jis')` から作った逆引き表で行っている。元リポジトリの `sample/` 4ファイルでバイト単位の往復一致を確認済み。

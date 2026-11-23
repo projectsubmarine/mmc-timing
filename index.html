@@ -219,6 +219,7 @@ let state = loadState() || emptyState();
 const ui = {
   step: 'entry',
   cls: { entry: 0, first: 0, final: 0 },
+  fillCls: 5,                                                // 「エントリーから追加」の対象クラス（既定 Kids、-1 は全クラス）
   imp: { text: '', groups: null, map: [], replace: true },   // 名簿取込（保存はしない）
 };
 
@@ -506,6 +507,17 @@ function buildStartList(second) {
   return { rows, issues };
 }
 
+// その run でまだリザルトに行が無い出走者を、出走順のまま返す。
+//   k を省くと全クラス。2本目の Expert は buildStartList が予選通過者だけを返すので、
+//   そのクラスだけ特別扱いしなくてよい。
+//   判定は「タイムが空か」ではなく「そのビブの行があるか」。行さえあれば
+//   表に直接打てるので、押すたびに同じ人が増えることもない。
+function missingRiders(run, k) {
+  const got = new Set(state['res' + run].map(r => norm(r.bib)));
+  return buildStartList(run === 2).rows
+    .filter(r => r.bib && !got.has(r.bib) && (k == null || r.k === k));
+}
+
 // BuildResult：1本目と2本目をビブで突き合わせ、順位を付ける。
 // 重複したビブは下の行のタイムを採用する（Excel 版と同じ）
 function finalResult(k) {
@@ -586,9 +598,7 @@ function analyzeResults(run) {
   if (notEntered.length) issues.push(['info', `エントリーに無いビブ：${[...new Set(notEntered)].join('、')}`]);
 
   // 出走予定なのにリザルトに無い選手（2本目の Expert は1本目リザルトの選手が対象）
-  const got = new Set(rows.map(r => norm(r.bib)));
-  const expected = buildStartList(run === 2).rows.filter(r => r.bib);
-  const missing = expected.filter(r => !got.has(r.bib)).map(r => `${r.bib} ${r.name}`);
+  const missing = missingRiders(run).map(r => `${r.bib} ${r.name}`);
   if (rows.length && missing.length) issues.push(['info', `リザルトに無い選手（DNS？）：${missing.join('、')}`]);
   return { marks, issues };
 }
@@ -1088,7 +1098,13 @@ function viewResult(run) {
   const rows = state[key];
   const issuesBox = h('div');
   const chips = h('div', { class: 'chips' });
+  const emptyMsg = h('p', { class: 'empty' }, 'まだ取り込まれていません。');
+  const clearBtn = h('button', { class: 'btn danger', onclick: () => {
+    if (confirm(`${run}本目リザルト${rows.length}行をすべて消します。よろしいですか？`)) { state[key] = []; save(); render(); }
+  } }, 'すべて消す');
   const showStatus = () => {
+    emptyMsg.style.display = rows.length ? 'none' : '';
+    clearBtn.disabled = !rows.length;
     const { issues } = analyzeResults(run);
     issuesBox.replaceChildren(issueList(issues, rows.length ? '問題は見つかりませんでした。' : '') || '');
     const nUnknown = rows.filter(r => (norm(r.bib) || str(r.name) || str(r.time)) && classOf(r.bib) < 0).length;
@@ -1125,22 +1141,45 @@ function viewResult(run) {
 
   const resort = cmp => { state[key] = sortBy(rows, cmp); save(); render(); };
 
+  // 計測ソフトを通さないクラス（Kids の手集計など）のために、まだリザルトに
+  // 行が無い出走者をビブ・名前入りで追加する。あとは Time に打つだけになる。
+  const fillSel = h('select', { title: '行を追加するクラス' });
+  fillSel.append(h('option', { value: '-1' }, '全クラス'));
+  CLASSES.forEach((c, k) => fillSel.append(h('option', { value: String(k) }, c)));
+  fillSel.value = String(ui.fillCls);
+  fillSel.onchange = () => { ui.fillCls = Number(fillSel.value); };
+
+  const fill = () => {
+    const k = ui.fillCls < 0 ? null : ui.fillCls;
+    const label = k == null ? '全クラス' : CLASSES[k];
+    const add = missingRiders(run, k);
+    if (!add.length) { toast(`${label}は出走者全員が表にあります。`); return; }
+    const at = rows.length;
+    add.forEach(r => rows.push({ bib: r.bib, name: r.name, time: '' }));
+    save();
+    showStatus();
+    grid.render([at, 'time']);       // 追加した最初の行の Time にカーソルを置く
+    toast(`${label}の${add.length}人を追加しました。タイムを入力してください。`
+      + '\n入力して Enter を押すと下の行に移ります。');
+  };
+
   return [
     h('div', { class: 'panel' }, h('h2', {}, `${run}本目リザルトの取り込み`),
       drop,
-      h('p', { class: 'hint' }, '計測ソフトのリザルト CSV（9項目、見出しなし）の2番目（ビブ）、3番目（名前）、5番目（タイム）を取り込みます。読み込み後、同じビブの行（再計測など）を整理してください。クラス分けはビブで自動的に行われ、手順4・7にすぐ反映されます。')),
+      h('p', { class: 'hint' }, '計測ソフトのリザルト CSV（9項目、見出しなし）の2番目（ビブ）、3番目（名前）、5番目（タイム）を取り込みます。読み込み後、同じビブの行（再計測など）を整理してください。クラス分けはビブで自動的に行われ、手順4・7にすぐ反映されます。'),
+      h('p', { class: 'hint' }, '手集計のクラス（Kids など）や、CSV に入らなかった選手は、下の「エントリーから追加」でビブ・名前の入った行を出してからタイムを入力してください。')),
     h('div', { class: 'panel' },
       h('div', { class: 'row', style: 'margin-bottom:8px' }, chips),
       h('div', { class: 'row', style: 'margin-bottom:8px' },
         h('button', { class: 'btn', onclick: () => grid.addRow() }, '行を追加'),
+        fillSel, h('button', { class: 'btn', onclick: fill }, 'エントリーから追加'),
+        h('span', { style: 'width:12px' }),
         h('button', { class: 'btn', onclick: () => resort((a, b) => cmpBib(a.bib, b.bib)) }, 'ビブ順'),
         h('button', { class: 'btn', onclick: () => resort((a, b) => cmpTime(a.time, b.time)) }, 'タイム順'),
         h('span', { style: 'flex:1' }),
-        h('button', { class: 'btn danger', disabled: !rows.length, onclick: () => {
-          if (confirm(`${run}本目リザルト${rows.length}行をすべて消します。よろしいですか？`)) { state[key] = []; save(); render(); }
-        } }, 'すべて消す')),
+        clearBtn),
       grid.el,
-      rows.length ? null : h('p', { class: 'empty' }, 'まだ取り込まれていません。'),
+      emptyMsg,
       h('div', { class: 'legend' },
         h('span', { class: 'err' }, 'クラス不明'), h('span', { class: 'dup' }, 'ビブ重複'),
         h('span', { class: 'warn' }, 'タイム形式'), h('span', { class: 'info' }, 'エントリーに無い'))),
