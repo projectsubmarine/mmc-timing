@@ -210,7 +210,12 @@ const STARTLIST_PER_PAGE = STARTLIST_ROWS * STARTLIST_COLS;   // 1ページの�
 // 公開と閲覧（Firestore）。仕組みは下の「公開（Firestore）」の節を見ること。
 // ↓↓↓ Firebase コンソールで作ったプロジェクトの値をここに貼る ↓↓↓
 const FIREBASE = {
-  config: null,        // 例：{ apiKey: '…', authDomain: '…', projectId: '…', appId: '…' }
+  config: {            // Firebase コンソール →「ウェブアプリ」の設定値。Firestore と認証に要るぶんだけ。
+    apiKey: 'AIzaSyABC9fdpqJSrpEyFMpkJO3VhENjX8MHk0c',
+    authDomain: 'mmctiming-437a5.firebaseapp.com',
+    projectId: 'mmctiming-437a5',
+    appId: '1:942464625604:web:d315ed3601a22f79251291',
+  },
   eventId: 'mmc',      // 大会ごとに変えると前の大会の分が残る。閲覧用 URL の #view/<ここ>
 };
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
