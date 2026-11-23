@@ -154,8 +154,10 @@ dialog label{display:flex;gap:6px;align-items:center;margin:4px 0}
 .p-hd .l small{display:block;font-size:10pt;font-weight:normal}
 .p-hd .r{text-align:right;font-size:9pt}
 .p-sl-title{font-size:15pt;font-weight:bold;height:10mm}
-.p-sl{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5pt}
-.p-sl td{border:0.5pt solid #000;height:4.3mm;padding:0 1mm;white-space:nowrap;overflow:hidden}
+/* line-height は body の 1.5 を打ち消すために必ず指定する。継承したままだと
+   8.5pt × 1.5 = 4.5mm の行箱が height より高くなり、55行が1ページに収まらない。 */
+.p-sl{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8.5pt;line-height:1.1}
+.p-sl td{border:0.5pt solid #000;height:4.2mm;padding:0 1mm;white-space:nowrap;overflow:hidden}
 .p-sl td.b{text-align:center}
 .p-sl td.gap{border:0;width:1.5mm}
 </style>
