@@ -1579,6 +1579,17 @@ function qrSvg(text, cssSize) {
 }
 
 // ---------- 10 QRコード ----------
+function qrIssues() {
+  const issues = [];
+  if (!FIREBASE.config)
+    issues.push(['warn', '公開の設定がまだです。この QR を読んでも、まだ何も表示されません。']);
+  if (!onPublicSite())
+    issues.push(['info', `この画面は ${location.protocol === 'file:' ? 'ローカルのファイル' : location.origin} で開いていますが、`
+      + `QR と「URL をコピー」に入るのは公開サイト（${PUBLIC_URL}）の URL です。`
+      + '公開先を変えたときは index.html の PUBLIC_URL を直してください。']);
+  return issues;
+}
+
 function viewQr() {
   const url = viewUrl();
   const svg = qrSvg(url, 240);
@@ -1586,8 +1597,7 @@ function viewQr() {
     h('div', { class: 'panel' }, h('h2', {}, '閲覧用 QR コード'),
       h('p', { class: 'hint', style: 'margin:0 0 10px' },
         '閲覧用 URL の QR コードです。印刷して会場に貼り出してください。読み取った人はリザルトを見るだけで、編集はできません。'),
-      !FIREBASE.config ? h('p', { class: 'issues' },
-        h('span', { class: 'warn' }, '公開の設定がまだです。この QR を読んでも、まだ何も表示されません。')) : null,
+      issueList(qrIssues()),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: !svg, onclick: () => printQr() }, '印刷'),
         h('button', { class: 'btn', onclick: async () => {
@@ -1724,11 +1734,16 @@ function setPub(text) {
   $('#pub-label').textContent = text;
 }
 
-// 閲覧用 URL。ローカルのファイルを直接開いているときは配っても相手が開けないので、
-// 公開サイトの URL を使う。
+// 閲覧用 URL。配る相手が辿り着けるのは公開サイトだけなので、こちらがどこで開いて
+// いるかに関係なく、常に公開サイトの URL を配る。
+//   今の場所から組み立てると、ローカルサーバー（localhost や LAN の IP）で開いて
+//   いるときに、誰も開けない URL が QR になってしまう。エラーにならず見た目も
+//   普通なので、貼り出すまで気づけない。
+//   サイトを引っ越したら（独自ドメイン、リポジトリ名の変更など）ここを直す。
+//   直し忘れても気づけるよう、QR の画面で今の場所と食い違っていたら知らせる。
 const PUBLIC_URL = 'https://projectsubmarine.github.io/mmc-timing/';
-const viewUrl = () =>
-  (location.protocol === 'file:' ? PUBLIC_URL : location.href.replace(/#.*$/, '')) + '#view/' + FIREBASE.eventId;
+const onPublicSite = () => location.href.startsWith(PUBLIC_URL);
+const viewUrl = () => PUBLIC_URL + '#view/' + FIREBASE.eventId;
 
 const hhmm = d => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
 
