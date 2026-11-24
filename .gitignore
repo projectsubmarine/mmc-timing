@@ -16,3 +16,7 @@
 *.csv
 *.json
 !package.json
+
+# 動作テスト用のダミーデータだけは置く(架空の名前のみ)
+!testdata/*.csv
+!testdata/*.json
